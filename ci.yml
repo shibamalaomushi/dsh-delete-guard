@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: node ${{ matrix.node }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 插件运行在 DSH 自带的 Node 上，桌面端当前是 24.x；覆盖 20/22/24 保证语法与 API 兼容。
+        node: ['20', '22', '24']
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # 本项目零依赖，不需要 install；NODE_ENV 只影响 npm 自身的提示。
+      - name: 端到端自测 / 静态审计 / 敏感信息扫描
+        run: npm test
+        env:
+          NODE_ENV: test

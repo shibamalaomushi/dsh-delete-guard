@@ -1,0 +1,16 @@
+# 统一按 LF 存储与检出：避免在 Windows 上工作区被写成 CRLF 导致的字节差异。
+# 本插件的测试会逐字节比对文件，行尾漂移会让比对结果变得不可信。
+* text=auto eol=lf
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.tgz binary

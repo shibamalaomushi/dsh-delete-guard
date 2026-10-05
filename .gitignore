@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+dist/
+coverage/
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+*.tmp
+*.bak
+
+# 插件运行时数据（正常情况下不会落在仓库里，防误提交）
+session-manager/
+
+# 分发包（Release 资源，不入库）
+*.tgz

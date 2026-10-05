@@ -1,0 +1,63 @@
+{
+  "name": "dsh-delete-guard",
+  "version": "1.3.1",
+  "private": true,
+  "type": "module",
+  "description": "受控删除与回收站：默认移入可还原的回收站，提供 10 项服务端强制的删除策略、分级安全确认与全程审计日志；支持批量删除、多入口（面板/会话行/斜杠命令）与活跃会话保护。 | Guarded session deletion for DSH: recoverable trash, server-enforced deletion policy, graded confirmation, full audit log, batch actions and live-session protection.",
+  "author": "shibamalaomushi",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.js",
+    "client.js",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "cordis",
+    "session",
+    "session-manager",
+    "trash",
+    "recycle-bin",
+    "safe-delete",
+    "delete-policy",
+    "audit"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shibamalaomushi/dsh-delete-guard.git"
+  },
+  "homepage": "https://github.com/shibamalaomushi/dsh-delete-guard#readme",
+  "bugs": {
+    "url": "https://github.com/shibamalaomushi/dsh-delete-guard/issues"
+  },
+  "scripts": {
+    "test": "node test/selftest.mjs && node test/audit.mjs . && node test/sensitive-scan.mjs ."
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  },
+  "license": "MIT"
+}

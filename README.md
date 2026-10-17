@@ -1,13 +1,12 @@
 # dsh-delete-guard
 
-[![CI](https://github.com/shibamalaomushi/dsh-delete-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/shibamalaomushi/dsh-delete-guard/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/shibamalaomushi/dsh-delete-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/shibamalaomushi/dsh-delete-guard/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）用的**会话管理**插件：
-在 Web 界面里**删除单条或批量删除会话**。
+在 Web 界面里**删除单条或批量删除会话**——而且只动你选中的那些。
 
-> Harness 自带的能力只有「归档」，归档不改动会话正文。本插件默认把删除变成
+> Harness 自带的能力只有「归档」，归档不改动会话正文。本插件做真正的删除，默认把删除变成
 > **可还原**的操作，并把"能删什么、删到什么程度"变成**显式配置 + 服务端强制**的策略。
 
 ```
@@ -23,14 +22,14 @@
 
 ## 与同类插件的差异
 
-DSH 生态里已经有不少会话管理与回收站类插件。
-（下表依据各插件在 npm 上的公开描述整理。）
+DSH 生态里已经有不少会话管理与回收站类插件。本插件的取舍很明确：**把"删除"当成需要治理的危险操作**，
+而不是一个按钮。（下表依据各插件在 npm 上的公开描述整理。）
 
 | 能力 | 本插件 | 常见的会话管理 / 回收站插件 |
 | --- | --- | --- |
 | 删除默认进回收站、随时还原 | ✅ | 部分有 |
 | 回收站保留期与自动清理（`trashKeepDays`） | ✅ | 少见 |
-| **可配置的删除策略，服务端强制（10 项）** | ✅ 只读模式、禁止彻底删除、子代理保护、置顶/归档保护、永不删除名单、批量上限、确认阈值、确认词 | **基本没有** |
+| **可配置的删除策略，服务端强制（11 项）** | ✅ 只读模式、禁止彻底删除、子代理保护、置顶/归档保护、永不删除名单、批量上限、确认阈值、确认词 | **基本没有** |
 | 分级安全确认（按严重度加摩擦） | ✅ 可还原的操作不加摩擦；不可恢复的要求输入确认词 | 一般是固定的二次确认 |
 | 全程审计日志 | ✅ `<DSH_HOME>/session-manager/log.jsonl` | 少见 |
 | 批量与多入口 | ✅ 侧边栏面板 / 会话行悬停 / 右键菜单 / `/sessions` 命令 | 部分有 |
@@ -64,35 +63,41 @@ DSH 生态里已经有不少会话管理与回收站类插件。
   置顶/归档是否算受保护类别、永不删除的 id 名单、单次批量上限、确认词阈值与确认词本身。
 - **分类与筛选**：按主会话 / 子代理 / 已归档 / 已置顶 / 不可删分类；按标题、工作区或 id 筛选；
   按更新时间 / 大小 / 标题 / 工作区排序；每行与每组都能折叠（折叠状态记在本地）。
-- **使用中的会话拒绝删除**，给出两条出路：切换到别的会话，或**排入重启后删除**（下次启动自动进回收站）。
-- **回收站**：可还原、可彻底删除、可清空；按保留期自动清理（默认 30 天）。
+- **使用中的会话拒绝删除**，给出两条出路：切换到别的会话，或**排入重启后删除**（默认需在面板里确认执行）。
+- **回收站**：可还原、可彻底删除、可清空；按保留期自动清理（默认 30 天），自动清理遵守全部删除策略。
 - **可追溯**：所有动作写审计日志；界面底部直接显示会话根目录、插件数据目录与审计日志路径。
 - 中英双语界面，只用 `--dsw-*` 主题 token 着色，随明暗主题。
 
 ## 安全模型
 
-1. **只删目标那些**：会话 id 需匹配严格格式，且必须是 `<DSH_HOME>/sessions/<工作区>/` 下的直接子目录；
-   目录里**必须真的装着会话日志**（`session*.jsonl[.zstd]`）——会话根下若出现非会话目录，既不列出也拒绝删除。
-2. **默认进回收站**：同一磁盘卷内的原子 `rename`，条目带 `meta.json` 记录原路径，随时可还原。
-3. **还原目标强校验**：还原前重新验证 `meta.json` 里记录的原路径确实落在会话根目录内、目录名等于会话 id、
-   投影缓存路径落在缓存目录内；任一条不满足就拒绝（元数据可能被外部改动）。
-4. **活跃判定用内核权威数据**：`ctx.sessions.get/list`，并额外咨询内核自己的 `workspace/session-activity`
-   waterfall（回合 / 后台任务 / 子代理 / 定时任务）；**判不出来时一律拒绝删除**（fail-closed）。
-5. **策略闸门服务端强制**：界面禁用只是提示，真正的拒绝发生在 Host；策略违规**先于参数校验**返回，
-   不会被"条数过期"之类的错误掩盖。**单条删除、批量删除、彻底删除、清空回收站、列表标记共用同一套
-   判定函数**，所以不存在"某条路径漏判"；清空回收站会跳过受保护与无法归属的条目并如实报告跳过数量
-   （不会为了"清空"而销毁受保护的数据）。
-6. **批量请求有数量证明**：批量删除/彻底删除要求 `confirmCount` 与实际条数一致；清空回收站还要求
-   条数与界面显示一致（防止"界面看到 2 条、实际已变成 30 条"的 TOCTOU），并要求输入确认词。
-   **排队（重启后删除）同样过策略闸门**；因策略而永久失败的排队项会在下次启动被丢弃，并在启动报告里
-   标明 `dropped` 与原因，不会变成每次启动都白跑一遍的僵尸任务。
-7. **引用一并清理**：`<DSH_HOME>/storages/workspace.json` 里这些会话的引用被深度摘除（数组删元素、
-   标量置空、以 id 为键的映射整条删除，不依赖字段名）；改写前留 `.bak`，改写后回读校验。
-8. **不做格式耦合**：整目录移动，`session.v4.jsonl.zstd` 还是将来的 `vN`、压缩还是明文都一样处理。
-9. **HTTP 接口带信任围栏**：只接受回环 Host + 同源请求，拒绝 `Sec-Fetch-Site: cross-site` 与异源 `Origin`；
-   校验器自身出错一律 fail-closed；宿主 `connection` 栅栏可用时额外委托它。接口不使用 `/api` 前缀，
-   避免因"最长前缀匹配"越过内核自身的鉴权。
-10. **全程审计**：所有动作（含被拒的批量请求）写 `<DSH_HOME>/session-manager/log.jsonl`。
+1. **只删目标那些**：会话 id 需匹配严格格式，且必须是真实会话根下的直接子目录；目录里**必须真的装着会话日志**
+   （`session*.jsonl[.zstd]`）。会话根默认取 `ctx.sessionPersistence.root`（0.2.1），可用 `sessionsRoot`
+   显式覆盖；不再重实现 projectKey，因此 `~`、`root`、`_no-cwd` 等 0.2.1 目录规则不会漂移。
+2. **所有路径都做真实路径校验**：先词法检查，再 `realpath` + 逐层 `lstat`；拒绝 symlink/junction 祖先、
+   拒绝跨盘绝对路径、拒绝悬空链接目标。还原目标只用 `workspaceSlug + sessionDirName` 重建，不直接信任
+   `meta.json` 的 `originalPath`。
+3. **默认进回收站**：同一磁盘卷内的原子 `rename`，条目带 v2 `meta.json`；条目目录永远由回收站目录项推导，
+   **meta 里的 `dir`/`entryId` 不能改变实际删除路径**。
+4. **自动清理遵守全部策略**：`trashKeepDays` 到期时逐条过 `trashPolicyRejection`；`enabled:false`、
+   `allowPurge:false`、受保护会话、子代理保护、归档/置顶保护、orphan、不完整/损坏条目一律跳过并报告。
+5. **还原/删除目标强校验**：真实目录、无链接祖先、目标不存在、meta 身份一致；任一不满足即拒绝。
+6. **活跃判定用内核权威数据**：`ctx.sessions.get/list`，并咨询 `workspace/session-activity` waterfall
+   （回合 / 后台任务 / 子代理 / 定时任务）；有 workspace 注册表但活动读数失败时 **fail-closed**。
+   单条、批量、斜杠命令、排队执行全部走同一道闸门。
+7. **策略闸门服务端强制**：界面禁用只是提示；策略违规先于参数校验返回。单条/批量/清空/列表标记共用
+   判定函数。不可恢复操作（单条 purge、批量 purge、清空）都执行 `requireTypedConfirmAt` 对应的确认词校验。
+8. **0.2.1 引用通过 `ctx.workspaceRegistry` 更新**：`detachSession` / `attachSession` /
+   `archiveSession` / `pinSession` 等；不再直接改写 `workspace.json`（0.2.1 的 workspace 是 storage-json
+   的 single 单元，以内存为权威，外部改写会被覆盖且可能损坏领域）。无注册表时才回退到定向、带备份和
+   写后校验的旧版文件更新。
+9. **不做格式耦合**：整目录移动，`session.v4.jsonl.zstd` 还是将来的 `vN`、压缩还是明文都一样处理。
+10. **HTTP 接口带信任围栏**：优先委托宿主 `connection.requestRejection`（0.2.1 的 trustedHosts/TLS/认证）；
+    不可用时回退到回环 Host + 同源校验，拒绝 `Sec-Fetch-Site: cross-site`、异源与 `Origin: null`。
+    接口不使用 `/api` 前缀，避免越过内核自身鉴权。
+11. **全程审计**：所有动作（含被拒的批量请求）写 `<DSH_HOME>/session-manager/log.jsonl`；日志有大小上限
+    和轮转（默认 5 MiB × 3 份），单行有上限，写失败会通过 `/list` 暴露。
+12. **排队默认不静默执行**：重启后排队项默认保留，用户确认后才执行；`processPendingOnStartup: true`
+    可显式恢复旧行为。执行前校验会话 cwd/createdAt 身份，防止同 id 重建后误删。
 
 ## 策略配置
 
@@ -108,39 +113,50 @@ DSH 生态里已经有不少会话管理与回收站类插件。
     protectArchived: false      # true = 已归档的会话不可删（需先取消归档）
     protectedSessionIds: []     # 永不删除的会话 id 名单
     maxBatchSize: 50            # 单次批量操作上限
+    maxPending: 500             # 排队表上限
     requireTypedConfirmAt: 3    # 彻底删除达到几条时开始要求输入确认词
     purgeConfirmWord: PURGE     # 确认词本身
     trashKeepDays: 30           # 回收站保留天数；0 表示永不自动清理
+    processPendingOnStartup: false  # 默认不在启动时静默执行排队删除
+    trashSweepIntervalHours: 6  # 长期运行时的自动清理间隔；0 关闭
+    logMaxBytes: 5242880        # 审计日志单文件上限；0 不限
+    logKeepFiles: 3             # 审计日志保留份数
+    dshHome: null               # 可选：显式覆盖 DSH_HOME（优先于环境变量）
+    sessionsRoot: null          # 可选：显式覆盖会话根；默认取 sessionPersistence.root
 ```
 
 界面顶部的「安全策略」一排标签就是当前生效的策略（例如开了只读模式会显示红色 `只读模式`）。
 
-## 动了哪些文件
+## 它动了哪些文件
 
 | 路径 | 作用 |
 | --- | --- |
-| `<DSH_HOME>/sessions/<工作区>/<会话id>/` | 会话正文（整目录移动 / 还原） |
+| `<sessionPersistence.root>/<工作区>/<会话目录>/` | 会话正文（整目录移动 / 还原）；0.2.1 默认 `$DSH_HOME/sessions` |
 | `<DSH_HOME>/storages/session_projcache/sessions/<会话id>.json`（及 `.bak.*`） | 投影缓存（一并移动；删掉会按需重建） |
-| `<DSH_HOME>/storages/workspace.json` | 侧边栏引用（摘除 / 还原） |
-| `<DSH_HOME>/session-manager/` | 插件自己的回收站、排队表、审计日志（目录名沿用 `session-manager`：改名或升级都不会丢数据） |
+| `ctx.workspaceRegistry` | 侧边栏引用 / 归档 / 置顶状态（0.2.1 主路径） |
+| `<DSH_HOME>/storages/workspace.json` | 仅在没有 workspaceRegistry 时作为兼容回退，定向更新并写后校验 |
+| `<DSH_HOME>/session-manager/` | 插件自己的回收站、排队表、修复队列、审计日志（目录名沿用 `session-manager`） |
 
 除此之外不读写任何位置；插件不联网、不读取任何凭据。
 
 ## 安装
 
-**方式一：Release 的单文件包**
+**方式一：Release 的单文件包（推荐，最快）**
+
+GitHub Release 里的 `dsh-delete-guard-<版本>.tgz` 只有 ~65 KB，一条命令装完（不需要 `git`、
+不需要构建，实测约 0.3 秒）：
 
 ```bash
-dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v1.3.1/dsh-delete-guard-1.3.1.tgz"
+dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.0.0/dsh-delete-guard-2.0.0.tgz"
 ```
 
-**方式二：从 tag 的源码快照**
+**方式二：从 tag 的源码快照（不需要 Release 资源，但会下载整个仓库快照）**
 
 ```bash
-dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v1.3.1"
+dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v2.0.0"
 ```
 
-**方式三：从本地目录**
+**方式三：从本地目录（开发/自用）**
 
 ```bash
 dsh plugin --profile <profile> add "file:<本目录绝对路径>"
@@ -148,7 +164,7 @@ dsh plugin --profile <profile> add "file:<本目录绝对路径>"
 
 > 注意用 `file:`，**不要用 `link:`**：`link:` 会产生 Junction/符号链接，桌面版会拒绝加载。
 
-三种方式装出来都是**真实目录**，装完**重启一次应用**——内核在启动时装载插件的模块世代
+三种方式装出来都是**真实目录**（不是链接），装完**重启一次应用**——内核在启动时装载插件的模块世代
 与浏览器半身。上面的路径里 `<profile>` 换成你使用的 profile 名（桌面版通常是 `desktop`）。
 
 > 从 `.tgz` 或 tag 快照安装时，包里只含运行所需文件（`index.js`、`client.js`、`locale/`、
@@ -169,28 +185,34 @@ dsh plugin --profile <profile> remove dsh-delete-guard
   删除退化为"排入重启后删除"——刻意保守。
 - **跨进程占用无法探测**：Windows 上内核的会话写租约是"具名内核信号量、无文件痕迹"（内核文档明确如此），
   第三方插件无法可靠探测，也不应去探测。因此"另一个 DSH 实例正在写同一条会话"只能靠排队到重启后执行规避。
-- **内核的记账可能被它自己写回**：`workspace.json` 的 `sessionIds` 由内核在内存中持有并在下次变更时整体落盘，
-  插件摘除的悬空 id 可能被写回。内核读列表时会按实际存在的会话过滤，因此不影响正确性。
+- **0.2.1 workspace 以内存为权威**：插件通过 `ctx.workspaceRegistry` 更新引用；只有没有注册表的组合才回退到
+  `workspace.json` 的定向更新。旧回退在宿主下一次整体写入时可能被覆盖。
 - **回收站不跨卷**：`rename` 要求回收站与会话根在同一磁盘卷（默认都在 `<DSH_HOME>` 下）。
-- **无法归属的回收站残留不会被自动清除**：条目目录里若没有可读的 `meta.json`（例如异常断电、或外部改动），
+- **无法归属的回收站残留不会被自动清除**：条目目录里若没有可读且一致的 `meta.json`（例如异常断电、或外部改动），
   插件既不列出、也不参与"清空回收站"（保守：不销毁无法归属的东西），只会在结果里报为 `orphan`。
   真要清理请手动删除 `<DSH_HOME>/session-manager/trash/<条目目录>`。
-  新版已把 `meta.json` 提前到正文之前落盘，因此**正常路径不会再产生**这类残留。
+- **不完整/损坏条目**：启动恢复会补全“payload 已搬完但 meta 未标 complete”的条目，并清理只有 meta 的空条目；
+  仍然缺 payload 的条目标为 `broken`，不会被自动删除，也不会被还原。
+- **父会话与子会话**：删除父会话不会级联删除子会话；面板会提示 `childSessionCount`，子会话日志保留为孤立记录。
 - **行内入口不改内核列表**：悬停按钮/右键菜单只打开面板确认；删除后侧边栏行由内核自己刷新。
 - **界面文案随系统语言**：只内置 `zh` 与 `en`。
 
 ## 兼容性
 
-- 面向 DSH `0.2.0` 系列内核开发与验证（`dsh-base` + `dsh-web-app` 组合）。
-- 插件只使用 Node 内置模块与内核公开服务（`webServer`、`sessions`，可选 `commands`、`connection`），
-  不 import 任何 `@deepseek-ai/*` 包，因此对内核版本升级不敏感。
+- 面向 DSH `0.2.1-rc.2` 开发与验证（`dsh-base` + `dsh-web-app` 组合）；`engines.dsh` 声明为
+  `>=0.2.1-rc.2 <0.3.0`。0.2.0 的 `workspace.json` 回退代码保留，但不在正式支持声明内。
+- 0.2.1 适配要点：Session 格式 v4（整目录移动，格式无关）、`ctx.sessionPersistence.root` 可配置、
+  workspace 领域 v2（通过 `ctx.workspaceRegistry` 更新）、`workspace/session-activity` 活动检查。
+- 插件只使用 Node 内置模块与内核公开服务（`webServer`、`sessions`、`sessionPersistence`、
+  `workspaceRegistry`，可选 `commands`、`connection`），不 import 任何 `@deepseek-ai/*` 包。
 - 浏览器半身遵循内核 Client 插件约定：`__ModuleLoader__` 惰性工厂、`sidebar.panellist` + root 作用域
   `main` 键控插槽、`sidebar.workspaces.session.row.action` / `.menu.item` 会话行插槽、只使用 `--dsw-*`
   主题 token、不 import 内核 Client 包。
 
 ## 设计依据
 
-- 破坏性操作的摩擦分级：低严重度（可还原）不加摩擦（尤其批量场景）；中/高严重度用弹窗 + 危险按钮；会连带删除附加资源时
+- 破坏性操作的摩擦分级：GitLab [Pajamas · Destructive actions](https://design-gitlab-com-gitlab-org-gitlab-services-f6beaf2fb7fd4cad76.gitlab.io/patterns/destructive-actions/)
+  ——低严重度（可还原）不加摩擦（尤其批量场景）；中/高严重度用弹窗 + 危险按钮；会连带删除附加资源时
   要求输入对象名确认。
 - 弹窗行为对齐宿主：`role="dialog"` + `aria-modal`、`Esc` 关闭、点击遮罩关闭、打开时聚焦（有确认词则聚焦输入框）。
 - **视觉只使用主题 token**，并且按内核设计系统的原样度量实现，不 import 任何内核 Client 包：
@@ -215,13 +237,14 @@ dsh plugin --profile <profile> remove dsh-delete-guard
 npm test     # = node test/selftest.mjs && node test/audit.mjs . && node test/sensitive-scan.mjs .
 ```
 
-- `test/selftest.mjs`：在**一次性假 DSH_HOME** 上端到端驱动 Host 半身，覆盖列举与标题、工作区目录名编码
-  （含非 ASCII）、子代理会话、诱饵目录、活跃拒绝、信任围栏、路径守卫、删除→回收站→还原→彻底删除、
-  引用摘除与还原、还原目标防篡改、回收站过期清理、排队与重启后处理、fail-closed、斜杠命令、**批量三种操作**、
-  **策略闸门（只读 / 禁彻底删除 / 子代理 / 置顶 / 归档 / 名单 / 批量上限）**、**确认词与 TOCTOU**、审计日志。
-  不触碰任何真实数据。
+- `test/selftest.mjs`：在**一次性假 DSH_HOME** 上端到端驱动 Host 半身，覆盖 0.2.1 根目录、workspaceRegistry、
+  子代理会话、诱饵目录、活跃/后台工作拒绝、信任围栏、路径守卫（含 junction/跨盘）、删除→回收站→还原→彻底删除、
+  引用摘除与还原、归档/置顶恢复、meta 篡改与自动清理策略、批量响应、服务端确认词、排队默认不执行与手动执行、
+  启动恢复、fail-closed、斜杠命令、日志轮转。不触碰任何真实数据。
+- `test/paths.mjs`：纯路径函数测试（DSH_HOME 优先级/`~` 展开、单段校验、跨盘/链接/目标存在性）。
 - `test/audit.mjs`：按内核装载规则静态审计包（manifest、`./client` 出口、locale 元数据、patch 行、
-  半身约定、入口数量、字典键集合一致、无内核包 import、无硬编码绝对路径、接口前缀不越过内核鉴权）。
+  半身约定、入口数量、字典键集合一致、无内核包 import、无硬编码绝对路径、接口前缀不越过内核鉴权、
+  安全 helper / 批量 `succeeded` / pending 默认 / 日志轮转断言）。
 - `test/sensitive-scan.mjs`：发布前的敏感信息扫描（绝对用户路径/家目录、邮箱、主机名、密钥形态，
   可用 `DSM_FORBIDDEN=词1,词2` 追加禁用词）。
 

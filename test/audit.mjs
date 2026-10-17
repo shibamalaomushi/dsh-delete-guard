@@ -35,12 +35,16 @@ check('license 已声明', typeof pkg.license === 'string' && pkg.license.length
 check('dsh.bundle.patch 声明且文件存在', pkg.dsh?.bundle?.patch === './cordis.patch.yml' && exists('cordis.patch.yml'))
 check('dsh.client.platform 是 web', pkg.dsh?.client?.platform === 'web', String(pkg.dsh?.client?.platform))
 check('dsh.client.immediately 是布尔', typeof pkg.dsh?.client?.immediately === 'boolean')
+check('dsh.manifestVersion 已声明为 1', pkg.dsh?.manifestVersion === 1, String(pkg.dsh?.manifestVersion))
+check('engines.dsh 声明 0.2.1 兼容范围', typeof pkg.engines?.dsh === 'string' && pkg.engines.dsh.includes('0.2.1'), String(pkg.engines?.dsh))
+check('版本已升到 2.x', /^2\.\d+\.\d+$/.test(String(pkg.version)), String(pkg.version))
 check('exports 暴露 ./client', typeof pkg.exports?.['./client'] === 'string', JSON.stringify(pkg.exports))
 check('exports 暴露 ./locale/*.json', typeof pkg.exports?.['./locale/*.json'] === 'string')
-check('files 含运行期文件', Array.isArray(pkg.files) && ['index.js', 'client.js', 'locale', 'icon.svg', 'cordis.patch.yml'].every((f) => pkg.files.includes(f)))
+check('files 含运行期文件', Array.isArray(pkg.files) && ['index.js', 'client.js', 'lib', 'locale', 'icon.svg', 'cordis.patch.yml'].every((f) => pkg.files.includes(f)))
 check('files 不含 test/ 与文档目录（安装副本保持精简）', Array.isArray(pkg.files) && !pkg.files.some((f) => /^test|^\.github|^docs/.test(f)))
 check('icon 指向存在的文件', typeof pkg.icon === 'string' && fs.existsSync(path.join(PKG, pkg.icon)), String(pkg.icon))
-check('npm test 脚本存在', typeof pkg.scripts?.test === 'string', String(pkg.scripts?.test))
+check('npm test 脚本存在且包含 paths 测试', typeof pkg.scripts?.test === 'string' && pkg.scripts.test.includes('test/paths.mjs'), String(pkg.scripts?.test))
+check('lib/paths.js 存在', exists('lib/paths.js'))
 
 // 2) 内核按 <pkg>/locale/en.json 作为展示元数据入口
 const en = JSON.parse(read('locale/en.json'))
@@ -72,6 +76,9 @@ check(
     client.includes(`${key}:`),
   ),
 )
+check('client.js 批量计数使用 succeeded', client.includes('result.succeeded') && client.includes("api('/process-pending'"))
+check('client.js 有排队执行与引用待修复文案', client.includes("processPending:") && client.includes("refsPending:"))
+check('client.js 单条 purge 传确认词', client.includes("api('/purge', { entryId: items[0].entryId, typedConfirm: typed })"))
 check('client.js 只 require react（不 import 内核 Client 包）', (() => {
   const code = stripComments(client)
   return /require\('react'\)/.test(code) && !/require\(['"]@deepseek-ai|from\s+['"]@deepseek-ai/.test(code)
@@ -96,18 +103,36 @@ check('index.js 的硬依赖只有 webServer', /export const inject = \['webServ
 check('index.js 用可选 fiber 接会话服务（缺失不会整体不激活）', host.includes("ctx.inject(['sessions']"))
 check('index.js 用可选 fiber 接斜杠命令服务', host.includes("ctx.inject(['commands']"))
 check('index.js 不 import 任何内核包', !/@deepseek-ai\//.test(stripComments(host)))
-check('index.js 有会话 id 与目录守卫', host.includes('SESSION_ID_RE') && host.includes('sessionDirOf'))
+check('index.js 有会话 id 与真实目录扫描守卫', host.includes('SESSION_ID_RE') && host.includes('scanSessionDirs') && host.includes('findSessionDir'))
 check('index.js 有回收站、还原与彻底删除', host.includes('moveToTrash') && host.includes('function restore') && host.includes('function purge'))
-check('index.js 还原前校验原路径（防篡改）', host.includes('bad-meta') && host.includes('validOriginal'))
-check('index.js 有信任围栏', host.includes('isLoopbackHostname') && host.includes('sec-fetch-site'))
+check(
+  'index.js 还原目标重建并拒绝路径/链接逃逸',
+  host.includes('resolveRestoreTarget') &&
+    host.includes('assertNoSymlinkAncestors') &&
+    host.includes('bad-meta') &&
+    host.includes('realpathNative') &&
+    host.includes('workspaceSlug'),
+)
+check('index.js 有信任围栏', host.includes('requestRejection') && host.includes('isLoopbackHostname') && host.includes('sec-fetch-site'))
 check('index.js 有审计日志', host.includes('log.jsonl'))
 check(
   'index.js 有批量接口与策略闸门',
   ['delete-batch', 'restore-batch', 'purge-batch'].every((p) => host.includes(p)) &&
     host.includes('assertPolicy') &&
-    host.includes('assertPurgeAllowed') &&
-    host.includes('assertTypedConfirm'),
+    host.includes('assertTypedConfirm') &&
+    host.includes('trashPolicyRejection'),
 )
+check('index.js 批量响应使用 succeeded 而不是覆盖 ok', host.includes('const succeeded = results.filter') && host.includes('succeeded,'))
+check('index.js 自动清理逐条过策略', host.includes('function sweepTrash') && host.includes('trashPolicyRejection(entry.meta)') && host.includes('POLICY.allowPurge'))
+check('index.js 回收站目录不由 meta.dir 决定', host.includes('normalizeMeta') && !/dir\s*:\s*raw\.dir/.test(host) && host.includes('payloadOf'))
+check('index.js 删除 stripIdDeep 整树遍历', !host.includes('stripIdDeep'))
+check('index.js 0.2.1 workspaceRegistry 主路径', host.includes("getWorkspaceRegistry") && host.includes('detachSession') && host.includes('attachSession'))
+check('index.js 兼容回退只定向更新已知字段', host.includes('removeRefsFallback') && host.includes('addRefsFallback') && !host.includes('stripIdDeep'))
+check('index.js 使用 sessionPersistence.root', host.includes('persistence.root') && host.includes('resolveSessionsRootInfo'))
+check('index.js 默认不自动处理排队', host.includes('processPendingOnStartup') && host.includes("result: 'deferred'"))
+check('index.js 有日志轮转与单行上限', host.includes('logMaxBytes') && host.includes('rotateLogIfNeeded') && host.includes('MAX_LOG_LINE_BYTES'))
+check('index.js 有启动恢复与引用修复', host.includes('recoverTrash') && host.includes('retryPendingRefs') && host.includes('refsPending'))
+check('index.js 在 workspace 注册表存在时检查 activity', host.includes("ctx.waterfall('workspace/session-activity'") && host.includes('assertNoActivity'))
 check(
   'index.js 的批量上限 / 确认阈值 / 确认词可配置',
   host.includes('maxBatchSize') && host.includes('requireTypedConfirmAt') && host.includes("'PURGE'"),
@@ -125,7 +150,7 @@ check(
 check('index.js 排队也要过策略闸门（避免队列里堆永远删不掉的条目）', host.includes('assertQueueable'))
 check(
   'index.js 队列里的永久失败项会被丢弃而不是每次启动重试',
-  host.includes("result: permanent ? 'dropped' : 'failed'") && host.includes('const permanent = ['),
+  host.includes("result: 'dropped'") && host.includes('permanentPendingCode'),
 )
 check('index.js 的策略文案集中在一处', host.includes('POLICY_MESSAGES'))
 check('接口前缀不是 /api（不越过内核鉴权）', host.includes("'/dsh-delete-guard/api'") && !host.includes("'/api"))

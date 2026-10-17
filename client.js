@@ -40,7 +40,7 @@ __ModuleLoader__.load({
       emptyFiltered: '没有符合当前分类与筛选条件的会话。',
       sessions: '会话',
       trash: '回收站',
-      pending: '待删除（重启后自动执行）',
+      pending: '待删除（需确认执行）',
       unlisted: '未登记',
       archived: '已归档',
       pinned: '已置顶',
@@ -103,7 +103,7 @@ __ModuleLoader__.load({
       failed: '失败',
       trashEmpty: '回收站是空的。',
       pendingEmpty: '没有排队的会话。',
-      pendingHint: '这些会话会在下次启动应用时移入回收站（那时它们不再被使用）。',
+      pendingHint: '这些会话不会在启动时静默删除；请在确认它们不再被使用后点击“执行排队删除”。',
       unreachable: '无法连接插件后台：{error}',
       unreachableHint: '插件刚安装时需要重启一次应用；若已重启仍失败，请查看 DSH 主进程日志。',
       queued: '已排入重启后删除。',
@@ -117,6 +117,18 @@ __ModuleLoader__.load({
       purgedN: '已彻底删除 {n} 条。',
       purgeAllDone: '回收站已清空。',
       startup: '启动时处理了排队的会话。',
+      startupDeferred: '启动时保留了 {n} 条排队删除，未自动执行。',
+      processPending: '执行排队删除',
+      confirmProcessPendingTitle: '执行 {n} 条排队删除？',
+      confirmProcessPendingBody: '这些会话会被移入回收站，之后仍可还原；仍在使用中的会话会被跳过。',
+      processedN: '已执行 {n} 条排队删除。',
+      processedPartial: '已执行 {n} 条，保留 {m} 条（仍在使用或暂时无法判定）。',
+      refsPending: '引用待修复',
+      ambiguous: 'id 重复',
+      childSessions: '含 {n} 个子会话',
+      unverified: '未在持久化索引中',
+      repairQueued: '部分侧边栏引用将在下次启动重试修复。',
+      logError: '审计日志写入失败：{error}',
       expand: '展开',
       collapse: '收起',
       policy: '安全策略',
@@ -157,7 +169,7 @@ __ModuleLoader__.load({
       emptyFiltered: 'No session matches the current category and filter.',
       sessions: 'Sessions',
       trash: 'Trash',
-      pending: 'Queued for deletion (runs on next launch)',
+      pending: 'Queued for deletion (needs confirmation)',
       unlisted: 'unlisted',
       archived: 'archived',
       pinned: 'pinned',
@@ -220,7 +232,7 @@ __ModuleLoader__.load({
       failed: 'Failed',
       trashEmpty: 'The trash is empty.',
       pendingEmpty: 'Nothing is queued.',
-      pendingHint: 'These move to the trash when the app next starts, when nothing holds them.',
+      pendingHint: 'Queued sessions are not deleted silently at startup. Confirm they are no longer in use, then choose “Run queued deletions”.',
       unreachable: 'Cannot reach the plugin backend: {error}',
       unreachableHint: 'A freshly installed plugin needs one app restart; if it still fails after that, check the DSH host log.',
       queued: 'Queued for deletion on next launch.',
@@ -234,6 +246,18 @@ __ModuleLoader__.load({
       purgedN: 'Permanently deleted {n}.',
       purgeAllDone: 'Trash emptied.',
       startup: 'Queued sessions were processed at startup.',
+      startupDeferred: 'Kept {n} queued deletion(s) at startup; nothing was deleted silently.',
+      processPending: 'Run queued deletions',
+      confirmProcessPendingTitle: 'Run {n} queued deletion(s)?',
+      confirmProcessPendingBody: 'They move to the trash and can still be restored. Sessions still in use are skipped.',
+      processedN: 'Ran {n} queued deletion(s).',
+      processedPartial: 'Ran {n}; kept {m} (still in use or temporarily unknown).',
+      refsPending: 'references pending',
+      ambiguous: 'duplicate id',
+      childSessions: '{n} child session(s)',
+      unverified: 'not in the persistence index',
+      repairQueued: 'Some sidebar references will be repaired on the next launch.',
+      logError: 'Audit log write failed: {error}',
       expand: 'Expand',
       collapse: 'Collapse',
       policy: 'Safety policy',
@@ -405,7 +429,10 @@ __ModuleLoader__.load({
       }
       if (!res.ok || !data || data.ok !== true) {
         const message = (data && data.error) || `${res.status} ${res.statusText || ''}`.trim()
-        throw new Error(message)
+        const error = new Error(message)
+        error.code = data && data.code
+        error.status = res.status
+        throw error
       }
       return data
     }
@@ -993,7 +1020,14 @@ __ModuleLoader__.load({
           await load()
         } catch (err) {
           if (alive.current) {
-            setNotice({ kind: 'err', text: `${t('failed')}：${String(err && err.message ? err.message : err)}` })
+            const code = err && err.code ? ` [${err.code}]` : ''
+            setNotice({ kind: 'err', text: `${t('failed')}：${String(err && err.message ? err.message : err)}${code}` })
+          }
+          // 批量/逐条操作可能是部分成功；失败后也刷新一次，避免界面停留在旧状态。
+          try {
+            await load()
+          } catch {
+            /* load 自己会显示错误 */
           }
         } finally {
           if (alive.current) setBusy(false)
@@ -1027,10 +1061,10 @@ __ModuleLoader__.load({
             run(
               (result) =>
                 result.failed > 0
-                  ? t('deletedPartial', { ok: result.ok, failed: result.failed })
+                  ? t('deletedPartial', { ok: result.succeeded ?? result.ok, failed: result.failed })
                   : items.length === 1
                     ? t('deleted')
-                    : t('deletedN', { n: result.ok }),
+                    : t('deletedN', { n: result.succeeded ?? result.ok }),
               () =>
                 items.length === 1
                   ? api('/delete', { id: items[0].id })
@@ -1052,10 +1086,10 @@ __ModuleLoader__.load({
           confirmLabel: t('batchPurge'),
           onConfirm: (typed) =>
             run(
-              (result) => (items.length === 1 ? t('purged') : t('purgedN', { n: result.ok })),
+              (result) => (items.length === 1 ? t('purged') : t('purgedN', { n: result.succeeded ?? result.ok })),
               () =>
                 items.length === 1
-                  ? api('/purge', { entryId: items[0].entryId })
+                  ? api('/purge', { entryId: items[0].entryId, typedConfirm: typed })
                   : api('/purge-batch', {
                       entryIds: items.map((x) => x.entryId),
                       confirmCount: items.length,
@@ -1110,6 +1144,29 @@ __ModuleLoader__.load({
       const sessions = data?.sessions ?? []
       const trash = data?.trash ?? []
       const pending = data?.pending ?? []
+      const deferredCount = (data?.startup ?? []).filter((item) => item.result === 'deferred').length
+      const logWriteError = data?.log?.writeError || ''
+      const warnings = Array.isArray(data?.warnings) ? data.warnings : []
+
+      const askProcessPending = () => {
+        const count = pending.length
+        setConfirm({
+          kind: 'process-pending',
+          items: pending,
+          title: t('confirmProcessPendingTitle', { n: count }),
+          description: t('confirmProcessPendingBody'),
+          danger: false,
+          confirmLabel: t('processPending'),
+          onConfirm: () =>
+            run(
+              (result) =>
+                result.remaining > 0
+                  ? t('processedPartial', { n: result.succeeded, m: result.remaining })
+                  : t('processedN', { n: result.succeeded }),
+              () => api('/process-pending', { confirmCount: count }),
+            ),
+        })
+      }
       const totalBytes = sessions.reduce((sum, s) => sum + (Number(s.bytes) || 0), 0)
       const needle = query.trim().toLowerCase()
 
@@ -1172,6 +1229,7 @@ __ModuleLoader__.load({
           case 'subagent-protected': return t('reasonSubagentProtected')
           case 'pinned-protected': return t('reasonPinnedProtected')
           case 'archived-protected': return t('reasonArchivedProtected')
+          case 'ambiguous': return t('ambiguous')
           default: return t('protected')
         }
       }
@@ -1244,6 +1302,9 @@ __ModuleLoader__.load({
         if (s.archived) badges.push(h('span', { key: 'arch', className: 'dsm-badge' }, t('archived')))
         if (s.pinned) badges.push(h('span', { key: 'pin', className: 'dsm-badge' }, t('pinned')))
         if (!s.listed && s.kind !== 'subagent') badges.push(h('span', { key: 'un', className: 'dsm-badge' }, t('unlisted')))
+        if (s.blockedReason === 'ambiguous') badges.push(h('span', { key: 'amb', className: 'dsm-badge dsm-badge-lock' }, t('ambiguous')))
+        if (s.unverified) badges.push(h('span', { key: 'uv', className: 'dsm-badge dsm-badge-unknown' }, t('unverified')))
+        if (s.childSessionCount > 0) badges.push(h('span', { key: 'kids', className: 'dsm-badge' }, t('childSessions', { n: s.childSessionCount })))
         if (!s.deletable && s.liveness === 'free') {
           badges.push(h('span', { key: 'lock', className: 'dsm-badge dsm-badge-lock' }, t('protected')))
         }
@@ -1293,6 +1354,8 @@ __ModuleLoader__.load({
           case 'protected': return t('reasonProtected')
           case 'subagent-protected': return t('reasonSubagentProtected')
           case 'orphan': return t('reasonOrphan')
+          case 'incomplete': return t('trashIncomplete')
+          case 'broken': return t('trashIncomplete')
           default: return t('protected')
         }
       }
@@ -1304,6 +1367,8 @@ __ModuleLoader__.load({
         const badges = []
         if (blocked) badges.push(h('span', { key: 'lock', className: 'dsm-badge dsm-badge-lock' }, t('protected')))
         if (item.complete === false) badges.push(h('span', { key: 'inc', className: 'dsm-badge dsm-badge-unknown' }, t('trashIncomplete')))
+        if (item.refsPending) badges.push(h('span', { key: 'refs', className: 'dsm-badge dsm-badge-unknown' }, t('refsPending')))
+        if (item.broken) badges.push(h('span', { key: 'broken', className: 'dsm-badge dsm-badge-lock' }, t('trashIncomplete')))
         return h(
           'div',
           { className: `dsm-card${selectedTrash.has(item.entryId) ? ' dsm-cardSel' : ''}`, key: item.entryId },
@@ -1321,7 +1386,14 @@ __ModuleLoader__.load({
             h('div', { className: 'dsm-cardMeta' }, meta),
             blocked ? h('div', { className: 'dsm-cardMeta dsm-notice-err' }, purgeBlockedText(blockedReason)) : null),
           h('div', { className: 'dsm-actions' },
-            h(Button, { label: t('restore'), variant: 'outline', small: true, disabled: busy, onClick: () => run(t('restored'), () => api('/restore', { entryId: item.entryId })) }),
+            h(Button, {
+              label: t('restore'),
+              variant: 'outline',
+              small: true,
+              disabled: busy || item.broken === true,
+              title: item.broken ? t('trashIncomplete') : t('restore'),
+              onClick: () => run(t('restored'), () => api('/restore', { entryId: item.entryId })),
+            }),
             h(Button, {
               label: t('purge'),
               variant: 'danger',
@@ -1392,6 +1464,15 @@ __ModuleLoader__.load({
           : null,
         state.status === 'error' && data
           ? h('p', { className: 'dsm-notice dsm-notice-err' }, t('unreachable', { error: state.error }))
+          : null,
+        deferredCount
+          ? h('p', { className: 'dsm-notice dsm-notice-warn' }, t('startupDeferred', { n: deferredCount }))
+          : null,
+        logWriteError
+          ? h('p', { className: 'dsm-notice dsm-notice-err' }, t('logError', { error: logWriteError }))
+          : null,
+        warnings.length
+          ? h('p', { className: 'dsm-notice dsm-notice-warn' }, warnings.slice(0, 3).join(' · '))
           : null,
 
         h('div', { className: 'dsm-tools' },
@@ -1491,7 +1572,18 @@ __ModuleLoader__.load({
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', gap: '6px' } },
                   selectedTrash.size
                     ? [
-                        h(Button, { key: 'r', label: t('batchRestore'), variant: 'outline', small: true, disabled: busy, onClick: () => run(t('restoredN', { n: selectedTrash.size }), () => api('/restore-batch', { entryIds: [...selectedTrash] })) }),
+                        h(Button, {
+                          key: 'r',
+                          label: t('batchRestore'),
+                          variant: 'outline',
+                          small: true,
+                          disabled: busy,
+                          onClick: () =>
+                            run(
+                              (result) => t('restoredN', { n: result.succeeded ?? result.ok }),
+                              () => api('/restore-batch', { entryIds: [...selectedTrash] }),
+                            ),
+                        }),
                         h(Button, {
                           key: 'p',
                           label: t('batchPurge'),
@@ -1525,7 +1617,15 @@ __ModuleLoader__.load({
           ? h('div', { className: 'dsm-group' },
               h('div', { className: 'dsm-groupHead' },
                 h('h2', { className: 'dsm-groupTitle' }, t('pending')),
-                h('span', { className: 'dsm-count' }, String(pending.length))),
+                h('span', { className: 'dsm-count' }, String(pending.length)),
+                h('span', { style: { marginLeft: 'auto' } },
+                  h(Button, {
+                    label: t('processPending'),
+                    variant: 'outline',
+                    small: true,
+                    disabled: busy || pending.length === 0 || policy?.enabled === false,
+                    onClick: askProcessPending,
+                  }))),
               h('p', { className: 'dsm-muted' }, t('pendingHint')),
               pending.map(pendingCard))
           : null,

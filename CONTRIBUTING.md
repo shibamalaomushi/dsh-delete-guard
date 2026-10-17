@@ -76,4 +76,4 @@ npm test
 
 ## 报告安全问题
 
-请勿在公开 issue 中披露可被利用的细节。
+请勿在公开 issue 中披露可被利用的细节，按 [SECURITY.md](SECURITY.md) 的方式私下报告。

@@ -10,6 +10,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import { Readable } from 'node:stream'
 import { apply } from '../index.js'
 
@@ -50,7 +51,17 @@ const pendingFile = () => JSON.parse(fs.readFileSync(path.join(DATA, 'pending.js
 
 function writeSession(root, slug, id, title, cwd, header = null) {
   fs.mkdirSync(path.join(root, slug, id), { recursive: true })
-  fs.writeFileSync(path.join(root, slug, id, 'session.v4.jsonl.zstd'), 'x'.repeat(100))
+  const line = JSON.stringify({
+    type: 'session',
+    version: 4,
+    id,
+    createdAt: Date.now(),
+    cwd,
+    delegationDepth: 0,
+    isSeeded: false,
+  }) + '\n'
+  const body = 'x'.repeat(100)
+  fs.writeFileSync(path.join(root, slug, id, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(Buffer.from(line + body)))
   fs.mkdirSync(CACHE, { recursive: true })
   fs.writeFileSync(
     path.join(CACHE, `${id}.json`),
@@ -206,6 +217,7 @@ async function call(routes, pathname, { method = 'GET', body, headers = {} } = {
   const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))])
   req.method = method
   req.headers = { host: '127.0.0.1:3000', ...headers }
+  req.socket = { remoteAddress: '127.0.0.1' }
   const chunks = []
   const res = {
     statusCode: 0,
@@ -469,7 +481,10 @@ function sessionFileIn(root, slug, id) {
   const listed = await call(second.routes, listPath)
   check('重启后排队项仍在磁盘上', fs.existsSync(sessionFile(SLUG, id)))
   check('启动报告标为 deferred', listed.json?.startup?.some((x) => x.sessionId === id && x.result === 'deferred'), JSON.stringify(listed.json?.startup))
-  const processed = await call(second.routes, processPendingPath, { method: 'POST', body: { confirmCount: 1 } })
+  const processed = await call(second.routes, processPendingPath, {
+    method: 'POST',
+    body: { confirmCount: 1, sessionIds: pendingFile().map((item) => item.sessionId) },
+  })
   check('手动执行排队删除成功', processed.status === 200 && processed.json?.succeeded === 1, JSON.stringify(processed.json))
   check('排队删除后正文已移走', !fs.existsSync(path.join(SESS, SLUG, id)))
 }

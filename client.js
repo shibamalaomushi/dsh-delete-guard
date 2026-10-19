@@ -25,7 +25,8 @@ __ModuleLoader__.load({
     const PANEL_ID = 'session-manager'
     const API = '/dsh-delete-guard/api'
     const NOTICE_MS = 5000
-    const POLL_MS = 30000
+    const POLL_MS = 60000
+    const ARM_TTL_MS = 120000
     const COLLAPSE_KEY = 'dsh-delete-guard.collapsed.v1'
 
     // ───────────────────────── 文案（zh 为键集合真源，en 必须完全对齐）─────────────────────────
@@ -41,6 +42,7 @@ __ModuleLoader__.load({
       sessions: '会话',
       trash: '回收站',
       pending: '待删除（需确认执行）',
+      pendingAuto: '待删除（下次启动自动处理）',
       unlisted: '未登记',
       archived: '已归档',
       pinned: '已置顶',
@@ -157,6 +159,101 @@ __ModuleLoader__.load({
       rowAction: '删除会话（打开会话管理确认）',
       armed: '已定位到该会话，请在弹窗里确认删除。',
       paths: '数据位置：会话 {sessions} · 数据 {data} · 审计日志 {log}',
+      armExpired: '这次行内删除请求已过期，请重新点击会话行按钮。',
+      armNotFound: '列表里找不到这条会话（可能已被删除）；没有执行任何操作。',
+      armFailed: '无法定位这条会话；没有执行任何操作。',
+      errConfigInvalid: '插件配置无效，所有删除已被阻止；请修正配置后重启。',
+      errProtectionUnknown: '无法确认置顶/归档的权威状态，保护策略无法验证；请稍后重试。',
+      errIdentityUnknown: '无法确认会话的真实身份，已拒绝删除；可先用诊断信息检查。',
+      errIdentityMismatch: '目录 id 与宿主日志身份不一致，已拒绝删除。',
+      errRootChanged: '会话根目录已变更；默认不迁移。请选择是否迁移到当前根目录。',
+      errStale: '预览之后内容已变化；请刷新并重新确认。',
+      errOccupied: '目标位置已有同名目录，未做还原。',
+      errBroken: '回收站条目缺少正文或已损坏；需要显式强制清理。',
+      errIncomplete: '回收站条目尚未完成搬移；请先查看启动恢复报告。',
+      errRefsPending: '该条目还有未完成的侧边栏引用修复；请先重试修复。',
+      errPendingCorrupt: '排队文件已损坏并已隔离；请检查后再操作。',
+      errConfirmRequired: '缺少确认数量；请刷新后重试。',
+      errActive: '这条会话仍有后台工作；请先停止，或排入待删除。',
+      errActivityUnknown: '无法读取后台工作状态；请排入待删除。',
+      errLive: '这条会话正在使用中；请切换会话或排入待删除。',
+      errNotFound: '目标已不存在（可能已被其他操作处理）。',
+      errAmbiguous: '会话 id 在多个工作区重复，无法安全判定。',
+      errTooMany: '超过单次批量上限。',
+      errAuditRequired: '强审计模式下审计日志写入失败，已拒绝彻底删除。',
+      errUnsafeRoot: '数据目录包含链接或不在 DSH_HOME 内，已拒绝写入。',
+      errWorkspaceMissing: '原工作区已不存在；正文已还原，但侧边栏引用未恢复。',
+      errCrossDevice: '回收站与会话根不在同一磁盘卷，无法原子移动。',
+      errKindUnknown: '无法确认会话类型，而子代理删除已被禁止。',
+      errInProgress: '同一请求的删除尚未完成，请稍后刷新。',
+      errGeneric: '操作失败。',
+      activityKinds: '活动类型：{kinds}',
+      childImpact: '其中 {n} 个子会话会保留为孤立记录（不会级联删除）。',
+      queueAuto: '排入下次启动删除',
+      queueManual: '排入待删除',
+      queuedAuto: '已排入队列；下次启动会处理。',
+      queuedManual: '已排入队列；需要在面板中确认执行。',
+      pendingHintAuto: '这些会话会在下次启动应用时自动处理；仍在使用中的会被跳过。',
+      pendingHintManual: '这些会话不会在启动时静默删除；请确认后点击“执行排队删除”。',
+      policyQueuedAuto: '排队：下次启动自动处理',
+      policyQueuedManual: '排队：需手动确认',
+      partialRestore: '部分还原：{n} 个投影缓存仍保留在回收站。',
+      restoredPartial: '已还原正文，但有 {n} 个缓存冲突被保留。',
+      conflictRetained: '冲突副本保留在回收站，可重试或显式清理。',
+      retryFailed: '仅重试失败项',
+      batchFailedTitle: '有 {n} 条失败',
+      batchPartialTitle: '完成，但有 {n} 条失败',
+      detailsTitle: '逐项原因',
+      orphansTitle: '异常条目',
+      orphansHint: '这些目录没有可读且一致的 meta.json；插件不会自动处理。',
+      orphanPurge: '清理异常条目',
+      orphanPurgeTitle: '永久清理异常条目？',
+      orphanPurgeBody: '该目录无法归属到会话，清理后不可恢复；请输入确认词。',
+      orphanPurged: '异常条目已清理。',
+      repairsTitle: '修复队列',
+      repairsHint: '侧边栏引用的恢复/摘除失败会记录在这里，可重试。',
+      retryRepairs: '重试修复',
+      repairsDone: '修复重试完成。',
+      sweepTitle: '上次自动清理',
+      sweepHint: '没有自动清理记录。',
+      sweepSummary: '删除 {removed} 条，跳过 {skipped} 条。',
+      recoveryTitle: '启动恢复',
+      recoveryHint: '没有需要展示的恢复动作。',
+      diagnostics: '导出诊断信息',
+      diagnosticsHint: '默认脱敏，不含正文、标题、路径或凭据。',
+      diagnosticsDone: '诊断信息已导出。',
+      diagnosticsFailed: '诊断信息导出失败。',
+      selectedHidden: '已选 {n} 条中有 {m} 条不在当前筛选结果中。',
+      batchLimitTitle: '超过批量上限',
+      batchLimitHint: '单次最多 {n} 条；已选择前 {n} 条。',
+      visibleSelected: '已选 {n} / 当前可见 {m}',
+      busyHint: '正在提交；完成前不能关闭此对话框。',
+      rootChangedTitle: '会话根目录已变更',
+      rootChangedBody: '这条会话原来在 {original}，当前根是 {current}。默认不迁移。',
+      relocateAction: '迁移到当前根',
+      relocated: '已按选择迁移到当前会话根。',
+      forcePurge: '强制清理损坏条目',
+      forcePurgeTitle: '强制清理损坏条目？',
+      forcePurgeBody: '这会删除回收站内无法完整还原的残留，且不可恢复；请输入确认词。',
+      forcePurged: '损坏条目已强制清理。',
+      configInvalidTitle: '配置无效',
+      configInvalidBody: '插件检测到配置类型/范围错误，已阻止所有删除。请修正后重启应用。',
+      projectionConflict: '{n} 个投影缓存因目标已存在而保留。',
+      queueAction: '排入待删除',
+      errConfirmWord: '确认词不正确。',
+      errConfirmMismatch: '确认数量与当前列表不一致；请刷新后重试。',
+      errPendingFull: '排队表已满；请先执行或取消排队。',
+      errRepairFull: '修复队列已满；请先重试或清理修复项。',
+      errWorkspaceReadonly: '工作区文件不可写或已被宿主更新；引用没有改动。',
+      errWorkspaceChanged: '工作区文件已被宿主更新；引用没有改动。',
+      errChanged: '目标在检查期间发生了变化；请刷新后重试。',
+      errProjectionFailed: '投影缓存移动失败，已回滚。',
+      errMoveFailed: '移入回收站失败。',
+      errRestoreFailed: '还原失败。',
+      errRefsFailed: '侧边栏引用更新失败。',
+      errEmptyTrash: '回收站已经是空的。',
+      errBadId: '会话 id 不合法。',
+      errBadEntry: '回收站条目 id 不合法。',
     }
     const en = {
       panel: 'Sessions',
@@ -170,6 +267,7 @@ __ModuleLoader__.load({
       sessions: 'Sessions',
       trash: 'Trash',
       pending: 'Queued for deletion (needs confirmation)',
+      pendingAuto: 'Queued for deletion (auto on next launch)',
       unlisted: 'unlisted',
       archived: 'archived',
       pinned: 'pinned',
@@ -286,6 +384,101 @@ __ModuleLoader__.load({
       rowAction: 'Delete session (opens Session Manager to confirm)',
       armed: 'Located that session; confirm the deletion in the dialog.',
       paths: 'Locations: sessions {sessions} · data {data} · audit log {log}',
+      armExpired: 'This row request expired; click the session row button again.',
+      armNotFound: 'That session is not in the list (it may already be gone); nothing was done.',
+      armFailed: 'Could not locate that session; nothing was done.',
+      errConfigInvalid: 'The plugin config is invalid; every deletion is blocked until it is fixed and the app restarts.',
+      errProtectionUnknown: 'Pinned/archived state cannot be verified, so the protection policy cannot be enforced; retry later.',
+      errIdentityUnknown: 'The session identity cannot be verified; deletion was refused. Check diagnostics first.',
+      errIdentityMismatch: 'The directory id does not match the Host log identity; deletion was refused.',
+      errRootChanged: 'The sessions root changed. Restore stays in place by default; choose whether to migrate.',
+      errStale: 'The previewed content changed; refresh and confirm again.',
+      errOccupied: 'The destination already has a directory with that name; nothing was restored.',
+      errBroken: 'This trash entry has no payload or is damaged; an explicit forced cleanup is required.',
+      errIncomplete: 'This trash entry has not finished moving; see the startup recovery report first.',
+      errRefsPending: 'Sidebar reference repair is still pending for this entry; retry it first.',
+      errPendingCorrupt: 'The pending file is corrupt and was quarantined; inspect it before continuing.',
+      errConfirmRequired: 'The confirmation count is missing; refresh and retry.',
+      errActive: 'The session still has background work; stop it or queue the deletion.',
+      errActivityUnknown: 'Background work state is unreadable; queue the deletion instead.',
+      errLive: 'The session is in use; switch sessions or queue the deletion.',
+      errNotFound: 'The target no longer exists (another operation may have handled it).',
+      errAmbiguous: 'The session id exists in multiple workspaces and cannot be resolved safely.',
+      errTooMany: 'The single-batch limit was exceeded.',
+      errAuditRequired: 'Strong audit mode is on and the audit append failed; permanent deletion was refused.',
+      errUnsafeRoot: 'A data directory contains a link or is outside DSH_HOME; the write was refused.',
+      errWorkspaceMissing: 'The original workspace is gone; the log was restored, but the sidebar reference was not.',
+      errCrossDevice: 'The trash and the sessions root are on different volumes; an atomic move is impossible.',
+      errKindUnknown: 'The session kind cannot be verified while subagent deletion is disabled.',
+      errInProgress: 'A delete for the same request is still in progress; refresh shortly.',
+      errGeneric: 'The operation failed.',
+      activityKinds: 'Activity: {kinds}',
+      childImpact: '{n} child session(s) will remain as orphan records (no cascade delete).',
+      queueAuto: 'Queue for next launch',
+      queueManual: 'Queue for deletion',
+      queuedAuto: 'Queued; it will be processed on the next launch.',
+      queuedManual: 'Queued; run it explicitly from the panel.',
+      pendingHintAuto: 'These sessions are processed automatically on the next launch; sessions still in use are skipped.',
+      pendingHintManual: 'These sessions are never deleted silently at startup; confirm and run them from the panel.',
+      policyQueuedAuto: 'queue: auto on next launch',
+      policyQueuedManual: 'queue: manual confirmation',
+      partialRestore: 'Partial restore: {n} projection cache file(s) remain in the trash.',
+      restoredPartial: 'The log was restored, but {n} cache conflict(s) were retained.',
+      conflictRetained: 'Conflicting copies stay in the trash for retry or explicit cleanup.',
+      retryFailed: 'Retry only failed items',
+      batchFailedTitle: '{n} item(s) failed',
+      batchPartialTitle: 'Completed with {n} failure(s)',
+      detailsTitle: 'Per-item reasons',
+      orphansTitle: 'Orphan entries',
+      orphansHint: 'These directories have no readable, consistent meta.json; the plugin never handles them automatically.',
+      orphanPurge: 'Clean orphan entry',
+      orphanPurgeTitle: 'Permanently clean the orphan entry?',
+      orphanPurgeBody: 'It cannot be attributed to a session and cannot be recovered; type the confirmation word.',
+      orphanPurged: 'Orphan entry cleaned.',
+      repairsTitle: 'Repair queue',
+      repairsHint: 'Failed sidebar attach/detach operations are recorded here and can be retried.',
+      retryRepairs: 'Retry repairs',
+      repairsDone: 'Repair retry finished.',
+      sweepTitle: 'Last automatic cleanup',
+      sweepHint: 'No automatic cleanup has run yet.',
+      sweepSummary: 'Removed {removed}; skipped {skipped}.',
+      recoveryTitle: 'Startup recovery',
+      recoveryHint: 'No recovery action to show.',
+      diagnostics: 'Export diagnostics',
+      diagnosticsHint: 'Redacted by default; no logs, titles, paths, or credentials.',
+      diagnosticsDone: 'Diagnostics exported.',
+      diagnosticsFailed: 'Could not export diagnostics.',
+      selectedHidden: '{m} of {n} selected item(s) are outside the current filter.',
+      batchLimitTitle: 'Batch limit exceeded',
+      batchLimitHint: 'At most {n} per batch; the first {n} were selected.',
+      visibleSelected: '{n} selected / {m} visible',
+      busyHint: 'Submitting; the dialog cannot be closed until it finishes.',
+      rootChangedTitle: 'Sessions root changed',
+      rootChangedBody: 'This session was under {original}; the current root is {current}. Nothing is migrated by default.',
+      relocateAction: 'Migrate to current root',
+      relocated: 'Migrated to the current sessions root.',
+      forcePurge: 'Force-clean damaged entry',
+      forcePurgeTitle: 'Force-clean the damaged entry?',
+      forcePurgeBody: 'This deletes unrecoverable leftovers inside the trash and cannot be undone; type the confirmation word.',
+      forcePurged: 'Damaged entry force-cleaned.',
+      configInvalidTitle: 'Invalid configuration',
+      configInvalidBody: 'The plugin detected invalid config types/ranges and blocked every deletion. Fix the config and restart.',
+      projectionConflict: '{n} projection cache file(s) were retained because the target exists.',
+      queueAction: 'Queue for deletion',
+      errConfirmWord: 'The confirmation word is incorrect.',
+      errConfirmMismatch: 'The confirmation count no longer matches the current list; refresh and retry.',
+      errPendingFull: 'The queue is full; run or cancel some entries first.',
+      errRepairFull: 'The repair queue is full; retry or clear some entries first.',
+      errWorkspaceReadonly: 'The workspace file is read-only or was updated by the Host; no reference was changed.',
+      errWorkspaceChanged: 'The workspace file was updated by the Host; no reference was changed.',
+      errChanged: 'The target changed while it was being checked; refresh and retry.',
+      errProjectionFailed: 'Moving the projection cache failed; it was rolled back.',
+      errMoveFailed: 'Moving the session to the trash failed.',
+      errRestoreFailed: 'Restoring the session failed.',
+      errRefsFailed: 'Updating the sidebar reference failed.',
+      errEmptyTrash: 'The trash is already empty.',
+      errBadId: 'The session id is invalid.',
+      errBadEntry: 'The trash entry id is invalid.',
     }
     const fallbackText = zh
 
@@ -345,7 +538,12 @@ __ModuleLoader__.load({
 .dsm-btn-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}
 .dsm-btn-primary:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}
 .dsm-btnSm{height:24px;font-size:11px;padding:0 8px}
-.dsm-notice{font-size:13px;line-height:20px;margin:0}
+.dsm-notice{display:flex;flex-direction:column;align-items:flex-start;gap:6px;font-size:13px;line-height:20px;margin:0}
+.dsm-noticeDetails{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dsm-noticeDetails ul,.dsm-noticeList{margin:4px 0 0;padding-left:18px}
+.dsm-details{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dsm-details summary{cursor:pointer;color:var(--dsw-alias-label-primary)}
+.dsm-commandIcon{display:inline-flex;flex:none;align-items:center;justify-content:center;width:14px;height:14px;color:var(--dsw-alias-menu-icon)}
 .dsm-notice-ok{color:var(--dsw-alias-state-success-primary)}
 .dsm-notice-err{color:var(--dsw-alias-state-error-primary)}
 .dsm-notice-warn{color:var(--dsw-alias-state-warn-primary)}
@@ -368,15 +566,15 @@ __ModuleLoader__.load({
 .dsm-menuItemDanger:focus-visible:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);outline:none}
 .dsm-modalRoot{pointer-events:auto;position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:max(24px,var(--dsh-frame-overlay-top,24px)) 24px}
 .dsm-modalMask{position:absolute;inset:var(--dsh-frame-chrome-top,0px) 0 0;background:var(--dsw-alias-bg-mask-1)}
-.dsm-dialog{box-sizing:border-box;position:relative;z-index:1;display:flex;flex-direction:column;gap:20px;width:min(380px,100%);padding:0 0 24px;overflow:hidden;border:0;border-radius:var(--dsw-radius-panel);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);animation:dsm-fade var(--ds-transition-duration,150ms) ease-out}
+.dsm-dialog{box-sizing:border-box;position:relative;z-index:1;display:flex;flex-direction:column;gap:20px;width:min(380px,100%);max-height:calc(100dvh - 48px);padding:0 0 24px;overflow:hidden;border:0;border-radius:var(--dsw-radius-panel);background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);animation:dsm-fade var(--ds-transition-duration,150ms) ease-out}
 .dsm-dialogWide{width:min(440px,100%)}
 .dsm-dialogHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:22px 14px 12px 24px}
 .dsm-dialogTitle{margin:0;font-size:16px;line-height:24px;font-weight:500;color:var(--dsw-alias-label-primary)}
 .dsm-dialogClose{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;border-radius:var(--dsw-radius-sm);background:transparent;cursor:pointer;color:var(--dsw-alias-label-secondary)}
-.dsm-dialogClose:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsm-dialogClose:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsm-dialogDescription{margin:0;padding:0 24px;font-size:14px;line-height:22px;color:var(--dsw-alias-label-primary)}
-.dsm-dialogBody{display:flex;flex-direction:column;gap:12px;min-width:0;margin-top:20px;padding:0 24px}
-.dsm-dialogFooter{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 24px}
+.dsm-dialogBody{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;overflow:auto;margin-top:20px;padding:0 24px}
+.dsm-dialogFooter{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:none;padding:0 24px}
 .dsm-warning{display:flex;align-items:flex-start;gap:10px;color:var(--dsw-alias-label-secondary);font-size:14px;line-height:22px}
 .dsm-warning p{margin:0}
 .dsm-warningIcon{flex:none;margin-top:2px;color:var(--dsw-alias-state-error-primary)}
@@ -432,9 +630,74 @@ __ModuleLoader__.load({
         const error = new Error(message)
         error.code = data && data.code
         error.status = res.status
+        error.details = data && data.details
         throw error
       }
       return data
+    }
+
+    const ERROR_KEYS = {
+      'config-invalid': 'errConfigInvalid',
+      'protection-unknown': 'errProtectionUnknown',
+      'identity-unknown': 'errIdentityUnknown',
+      'identity-mismatch': 'errIdentityMismatch',
+      'root-changed': 'errRootChanged',
+      stale: 'errStale',
+      occupied: 'errOccupied',
+      broken: 'errBroken',
+      incomplete: 'errIncomplete',
+      'refs-pending': 'errRefsPending',
+      'pending-corrupt': 'errPendingCorrupt',
+      'confirm-required': 'errConfirmRequired',
+      active: 'errActive',
+      'activity-unknown': 'errActivityUnknown',
+      live: 'errLive',
+      'live-unknown': 'errLive',
+      'not-found': 'errNotFound',
+      ambiguous: 'errAmbiguous',
+      'too-many': 'errTooMany',
+      'audit-required': 'errAuditRequired',
+      'unsafe-root': 'errUnsafeRoot',
+      'workspace-missing': 'errWorkspaceMissing',
+      'cross-device': 'errCrossDevice',
+      'kind-unknown': 'errKindUnknown',
+      'in-progress': 'errInProgress',
+      'confirm-word': 'errConfirmWord',
+      'confirm-mismatch': 'errConfirmMismatch',
+      'pending-full': 'errPendingFull',
+      'repair-full': 'errRepairFull',
+      'workspace-readonly': 'errWorkspaceReadonly',
+      'workspace-changed': 'errWorkspaceChanged',
+      changed: 'errChanged',
+      'projection-failed': 'errProjectionFailed',
+      'move-failed': 'errMoveFailed',
+      'restore-failed': 'errRestoreFailed',
+      'refs-failed': 'errRefsFailed',
+      'empty-trash': 'errEmptyTrash',
+      'bad-id': 'errBadId',
+      'bad-entry': 'errBadEntry',
+    }
+    function errorText(t, err) {
+      const key = err && err.code ? ERROR_KEYS[err.code] : undefined
+      if (key) return t(key)
+      if (err && typeof err.error === 'string' && err.error) return err.error
+      if (err && err.code) return `${t('errGeneric')} (${err.code})`
+      return String(err && err.message ? err.message : err)
+    }
+    function errorDetails(t, err) {
+      const details = err && err.details
+      if (!details || typeof details !== 'object') return []
+      const rows = []
+      if (Array.isArray(details.activity) && details.activity.length) {
+        rows.push(t('activityKinds', { kinds: details.activity.slice(0, 10).join(', ') }))
+      }
+      if (Array.isArray(details.errors) && details.errors.length) {
+        rows.push(details.errors.slice(0, 5).map((item) => `${item.key}: ${item.got} → ${item.expected}`).join(' · '))
+      }
+      if (Array.isArray(details.conflicts) && details.conflicts.length) {
+        rows.push(t('projectionConflict', { n: details.conflicts.length }))
+      }
+      return rows
     }
 
     // 页面与"行内入口"之间的最小通信：让行入口把某条会话交给面板确认，而不是自己去删。
@@ -710,6 +973,7 @@ __ModuleLoader__.load({
       andMoreLabel,
       typedLabel,
       typedPlaceholder,
+      busyHint,
       onCancel,
       onConfirm,
       busy,
@@ -717,23 +981,51 @@ __ModuleLoader__.load({
       const [typed, setTyped] = React.useState('')
       const inputRef = React.useRef(null)
       const confirmRef = React.useRef(null)
+      const dialogRef = React.useRef(null)
+      const previousFocus = React.useRef(null)
       const ready = !typedWord || typed.trim() === typedWord
 
       React.useEffect(() => {
+        previousFocus.current = typeof document !== 'undefined' ? document.activeElement : null
         const target = typedWord ? inputRef.current : confirmRef.current
         if (target && typeof target.focus === 'function') target.focus()
+        return () => {
+          const previous = previousFocus.current
+          if (previous && typeof previous.focus === 'function' && previous.isConnected !== false) {
+            try {
+              previous.focus()
+            } catch {
+              /* ignore */
+            }
+          }
+        }
       }, [typedWord])
 
       React.useEffect(() => {
         const onKey = (event) => {
           if (event.key === 'Escape') {
             event.stopPropagation()
-            onCancel()
+            if (!busy) onCancel()
+            return
+          }
+          if (event.key !== 'Tab' || !dialogRef.current) return
+          const nodes = [...dialogRef.current.querySelectorAll(
+            'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+          )]
+          if (!nodes.length) return
+          const first = nodes[0]
+          const last = nodes[nodes.length - 1]
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first.focus()
           }
         }
         document.addEventListener('keydown', onKey, true)
         return () => document.removeEventListener('keydown', onKey, true)
-      }, [onCancel])
+      }, [onCancel, busy])
 
       const shown = items.slice(0, 8)
       const hidden = items.length - shown.length
@@ -744,22 +1036,31 @@ __ModuleLoader__.load({
         {
           className: 'dsm-modalRoot',
           onMouseDown: (event) => {
-            if (event.target === event.currentTarget) onCancel()
+            if (!busy && event.target === event.currentTarget) onCancel()
           },
         },
-        h('div', { className: 'dsm-modalMask' }),
+        h('div', {
+          className: 'dsm-modalMask',
+          onMouseDown: (event) => {
+            event.stopPropagation()
+            if (!busy) onCancel()
+          },
+        }),
         h(
           'div',
           {
+            ref: dialogRef,
             className: `dsm-dialog${wide ? ' dsm-dialogWide' : ''}`,
             role: 'dialog',
             'aria-modal': 'true',
-            'aria-label': title,
+            'aria-labelledby': 'dsm-dialog-title',
+            'aria-busy': busy ? 'true' : undefined,
+            onMouseDown: (event) => event.stopPropagation(),
           },
           h(
             'div',
             { className: 'dsm-dialogHeader' },
-            h('h2', { className: 'dsm-dialogTitle' }, title),
+            h('h2', { id: 'dsm-dialog-title', className: 'dsm-dialogTitle' }, title),
             h(
               'button',
               {
@@ -768,6 +1069,7 @@ __ModuleLoader__.load({
                 'aria-label': closeLabel,
                 title: closeLabel,
                 onClick: onCancel,
+                disabled: busy,
               },
               h(CloseIcon, { size: 16 }),
             ),
@@ -822,6 +1124,7 @@ __ModuleLoader__.load({
                   }),
                 )
               : null,
+            busy && busyHint ? h('p', { className: 'dsm-muted' }, busyHint) : null,
           ),
           h(
             'div',
@@ -939,32 +1242,67 @@ __ModuleLoader__.load({
       const [collapsed, setCollapsed] = React.useState(loadCollapsed)
       const alive = React.useRef(true)
       const stateRef = React.useRef(state)
+      const loadSeq = React.useRef(0)
+      const loadAbort = React.useRef(null)
+      const tRef = React.useRef(t)
+      const blockedLabelRef = React.useRef(null)
+      const askTrashRef = React.useRef(null)
+      const consumeArmRef = React.useRef(() => {})
+      stateRef.current = state
+      tRef.current = t
 
-      React.useEffect(() => {
-        stateRef.current = state
-      }, [state])
+      // Defined before any early return so the row-entry effect can never hit
+      // the temporal dead zone of a loading render.
+      const blockedLabel = (reason) => {
+        switch (reason) {
+          case 'live': return t('live')
+          case 'unknown': return t('unknown')
+          case 'disabled': return t('reasonDisabled')
+          case 'config-invalid': return t('errConfigInvalid')
+          case 'protected': return t('reasonProtected')
+          case 'subagent-protected': return t('reasonSubagentProtected')
+          case 'kind-unknown': return t('errKindUnknown')
+          case 'pinned-protected': return t('reasonPinnedProtected')
+          case 'archived-protected': return t('reasonArchivedProtected')
+          case 'protection-unknown': return t('errProtectionUnknown')
+          case 'identity-unknown': return t('errIdentityUnknown')
+          case 'identity-mismatch': return t('errIdentityMismatch')
+          case 'ambiguous': return t('ambiguous')
+          default: return t('protected')
+        }
+      }
+      blockedLabelRef.current = blockedLabel
 
       React.useEffect(() => () => {
         alive.current = false
+        if (loadAbort.current) {
+          try {
+            loadAbort.current.abort()
+          } catch {
+            /* ignore */
+          }
+        }
       }, [])
 
       const load = React.useCallback(async (signal, { silent = false } = {}) => {
+        const seq = ++loadSeq.current
         if (!silent) setBusy(true)
         try {
           const data = await api('/list', undefined, signal)
-          if (alive.current) setState({ status: 'ready', data })
+          if (alive.current && seq === loadSeq.current) setState({ status: 'ready', data })
         } catch (err) {
           if (err && err.name === 'AbortError') return
-          if (alive.current && !silent) {
+          if (alive.current && seq === loadSeq.current && !silent) {
             setState((prev) => ({ status: 'error', error: String(err && err.message ? err.message : err), data: prev.data }))
           }
         } finally {
-          if (alive.current && !silent) setBusy(false)
+          if (alive.current && seq === loadSeq.current && !silent) setBusy(false)
         }
       }, [])
 
       React.useEffect(() => {
         const controller = new AbortController()
+        loadAbort.current = controller
         load(controller.signal)
         return () => controller.abort()
       }, [load])
@@ -976,52 +1314,98 @@ __ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [load])
 
-      // 行内入口（悬停按钮 / 右键菜单）把某条会话交过来：直接进确认弹窗
+      // 行内入口（悬停按钮 / 右键菜单）把某条会话交过来：等列表就绪后再消费，
+      // 失败/过期都明确告知，绝不出现"提示去弹窗确认但根本没有弹窗"。
       React.useEffect(() => {
         const consume = () => {
           if (!armRequest) return
+          const current = stateRef.current
+          if (current?.status !== 'ready' || !current.data) return
           const request = armRequest
+          if (Date.now() - (request.at || 0) > ARM_TTL_MS) {
+            armRequest = null
+            setNotice({ kind: 'warn', text: tRef.current('armExpired') })
+            return
+          }
           armRequest = null
-          const found = stateRef.current?.data?.sessions?.find((s) => s.id === request.sessionId)
+          const found = current.data.sessions?.find((s) => s.id === request.sessionId)
           if (!found) {
-            setNotice({ kind: 'warn', text: t('armed') })
+            setNotice({ kind: 'warn', text: tRef.current('armNotFound') })
             return
           }
           if (!found.deletable) {
-            setNotice({ kind: 'warn', text: `${found.title || found.id}：${blockedLabel(found.blockedReason)}` })
+            const label = blockedLabelRef.current ? blockedLabelRef.current(found.blockedReason) : tRef.current('protected')
+            setNotice({ kind: 'warn', text: `${found.title || found.id}：${label}` })
             return
           }
           setSelected(new Set())
-          askTrash([found])
+          if (askTrashRef.current) askTrashRef.current([found])
         }
-        const unsubscribe = bus.subscribe(consume)
+        consumeArmRef.current = consume
+        const unsubscribe = bus.subscribe(() => {
+          try {
+            consumeArmRef.current()
+          } catch (err) {
+            setNotice({ kind: 'err', text: tRef.current('armFailed') })
+          }
+        })
         consume()
         return unsubscribe
       }, [])
 
       React.useEffect(() => {
+        if (state.status === 'ready') consumeArmRef.current()
+      }, [state.status, state.data])
+
+      React.useEffect(() => {
+        const data = state.data
+        if (!data) return
+        const sessionIds = new Set((data.sessions ?? []).map((item) => item.id))
+        const trashIds = new Set((data.trash ?? []).map((item) => item.entryId))
+        setSelected((prev) => {
+          const next = new Set([...prev].filter((id) => sessionIds.has(id)))
+          return next.size === prev.size ? prev : next
+        })
+        setSelectedTrash((prev) => {
+          const next = new Set([...prev].filter((id) => trashIds.has(id)))
+          return next.size === prev.size ? prev : next
+        })
+      }, [state.data])
+
+      React.useEffect(() => {
         if (!notice) return undefined
         const timer = setTimeout(() => {
           if (alive.current) setNotice(null)
-        }, NOTICE_MS)
+        }, notice.kind === 'err' ? NOTICE_MS * 2 : NOTICE_MS)
         return () => clearTimeout(timer)
       }, [notice])
 
-      const run = async (okText, fn) => {
+      const run = async (okText, fn, { classify, onError } = {}) => {
         setBusy(true)
         setConfirm(null)
         try {
           const result = await fn()
           if (alive.current) {
-            setNotice({ kind: 'ok', text: typeof okText === 'function' ? okText(result) : okText })
-            setSelected(new Set())
-            setSelectedTrash(new Set())
+            const outcome = classify
+              ? classify(result)
+              : { kind: 'ok', text: typeof okText === 'function' ? okText(result) : okText }
+            const message = typeof outcome === 'string' ? { kind: 'ok', text: outcome } : outcome || { kind: 'ok', text: t('ok') }
+            setNotice(message)
+            if (Array.isArray(message.selectedIds)) setSelected(new Set(message.selectedIds))
+            else if (message.kind !== 'err') setSelected(new Set())
+            if (Array.isArray(message.selectedTrashIds)) setSelectedTrash(new Set(message.selectedTrashIds))
+            else if (message.kind !== 'err') setSelectedTrash(new Set())
           }
           await load()
         } catch (err) {
           if (alive.current) {
-            const code = err && err.code ? ` [${err.code}]` : ''
-            setNotice({ kind: 'err', text: `${t('failed')}：${String(err && err.message ? err.message : err)}${code}` })
+            const action = onError ? onError(err) : null
+            setNotice({
+              kind: 'err',
+              text: errorText(t, err),
+              details: errorDetails(t, err),
+              action,
+            })
           }
           // 批量/逐条操作可能是部分成功；失败后也刷新一次，避免界面停留在旧状态。
           try {
@@ -1050,28 +1434,67 @@ __ModuleLoader__.load({
 
       // 低严重度（可还原）：不加摩擦，只弹出"将影响哪些"的确认
       const askTrash = (items) => {
+        const max = Number(policy?.maxBatchSize) || 50
+        if (items.length > max) {
+          setNotice({ kind: 'warn', text: t('batchLimitHint', { n: max }) })
+          return
+        }
+        const children = items.reduce((sum, item) => sum + (Number(item.childSessionCount) || 0), 0)
+        const description = children
+          ? `${t('confirmTrashBody')} ${t('childImpact', { n: children })}`
+          : t('confirmTrashBody')
         setConfirm({
           kind: 'trash',
           items,
           title: t('confirmTrashTitle', { n: items.length }),
-          description: t('confirmTrashBody'),
+          description,
           danger: false,
           confirmLabel: t('batchTrash'),
           onConfirm: () =>
             run(
-              (result) =>
-                result.failed > 0
-                  ? t('deletedPartial', { ok: result.succeeded ?? result.ok, failed: result.failed })
-                  : items.length === 1
-                    ? t('deleted')
-                    : t('deletedN', { n: result.succeeded ?? result.ok }),
+              null,
               () =>
                 items.length === 1
-                  ? api('/delete', { id: items[0].id })
+                  ? api('/delete', { id: items[0].id, requestId: `ui:${Date.now()}:${items[0].id}` })
                   : api('/delete-batch', { ids: items.map((x) => x.id), confirmCount: items.length }),
+              {
+                classify: (result) => {
+                  if (items.length === 1) {
+                    return { kind: 'ok', text: t('deleted'), selectedIds: [] }
+                  }
+                  const failed = result.failed || 0
+                  const rows = (result.results || []).filter((row) => !row.ok)
+                  if (!failed) return { kind: 'ok', text: t('deletedN', { n: result.succeeded }), selectedIds: [] }
+                  return {
+                    kind: result.succeeded > 0 ? 'warn' : 'err',
+                    text: t('deletedPartial', { ok: result.succeeded, failed }),
+                    details: rows.slice(0, 6).map((row) => `${row.id}：${errorText(t, row)}`),
+                    selectedIds: rows.map((row) => row.id),
+                    action: rows.length
+                      ? {
+                          label: t('retryFailed'),
+                          onClick: () => askTrash(sessions.filter((s) => rows.some((row) => row.id === s.id))),
+                        }
+                      : null,
+                  }
+                },
+                onError: (err) => {
+                  const queueable = ['active', 'activity-unknown', 'live', 'live-unknown'].includes(err.code)
+                  if (!queueable || items.length !== 1) return null
+                  return {
+                    label: t('queueAction'),
+                    onClick: () =>
+                      run(
+                        policy?.processPendingOnStartup ? t('queuedAuto') : t('queuedManual'),
+                        () => api('/queue', { id: items[0].id }),
+                      ),
+                  }
+                },
+              },
             ),
         })
       }
+      askTrashRef.current = askTrash
 
       const askPurge = (items) => {
         const needWord = items.length >= (policy?.requireTypedConfirmAt ?? 3)
@@ -1086,7 +1509,7 @@ __ModuleLoader__.load({
           confirmLabel: t('batchPurge'),
           onConfirm: (typed) =>
             run(
-              (result) => (items.length === 1 ? t('purged') : t('purgedN', { n: result.succeeded ?? result.ok })),
+              null,
               () =>
                 items.length === 1
                   ? api('/purge', { entryId: items[0].entryId, typedConfirm: typed })
@@ -1095,15 +1518,39 @@ __ModuleLoader__.load({
                       confirmCount: items.length,
                       typedConfirm: typed,
                     }),
+              {
+                classify: (result) => {
+                  if (items.length === 1) return { kind: 'ok', text: t('purged'), selectedTrashIds: [] }
+                  const failed = result.failed || 0
+                  const rows = (result.results || []).filter((row) => !row.ok)
+                  if (!failed) return { kind: 'ok', text: t('purgedN', { n: result.succeeded }), selectedTrashIds: [] }
+                  return {
+                    kind: result.succeeded > 0 ? 'warn' : 'err',
+                    text: t('batchPartialTitle', { n: failed }),
+                    details: rows.slice(0, 6).map((row) => `${row.entryId}：${errorText(t, row)}`),
+                    selectedTrashIds: rows.map((row) => row.entryId),
+                    action: rows.length
+                      ? {
+                          label: t('retryFailed'),
+                          onClick: () => askPurge(trash.filter((x) => rows.some((row) => row.entryId === x.entryId))),
+                        }
+                      : null,
+                  }
+                },
+              },
             ),
         })
       }
 
-      const askPurgeAll = (count, skipCount) => {
+      const askPurgeAll = (entryIds, skipCount) => {
+        if (!entryIds.length) {
+          setNotice({ kind: 'warn', text: t('trashEmpty') })
+          return
+        }
         setConfirm({
           kind: 'purge-all',
           items: [],
-          title: t('confirmPurgeAllTitle', { n: count }),
+          title: t('confirmPurgeAllTitle', { n: entryIds.length }),
           description: skipCount
             ? `${t('confirmPurgeAllBody')} ${t('purgeAllSkipHint', { n: skipCount })}`
             : t('confirmPurgeAllBody'),
@@ -1113,12 +1560,72 @@ __ModuleLoader__.load({
           confirmLabel: t('purgeAll'),
           onConfirm: (typed) =>
             run(
-              (result) =>
-                result.skipped?.length
-                  ? t('purgedAllPartial', { n: result.count, m: result.skipped.length })
-                  : t('purgeAllDone'),
-              () => api('/purge-all', { confirmCount: count, typedConfirm: typed }),
+              null,
+              () => api('/purge-all', { entryIds, confirmCount: entryIds.length, typedConfirm: typed }),
+              {
+                classify: (result) => ({
+                  kind: result.skipped?.length ? 'warn' : 'ok',
+                  text: result.skipped?.length
+                    ? t('purgedAllPartial', { n: result.count, m: result.skipped.length })
+                    : t('purgeAllDone'),
+                  details: (result.skipped || []).slice(0, 6).map((row) => `${row.entryId}：${row.code}`),
+                  selectedTrashIds: [],
+                }),
+              },
             ),
+        })
+      }
+
+      const askForcePurge = (item) => {
+        setConfirm({
+          kind: 'force-purge',
+          items: [item],
+          title: t('forcePurgeTitle'),
+          description: t('forcePurgeBody'),
+          warning: t('warnIrreversible'),
+          danger: true,
+          typedWord: policy?.purgeConfirmWord ?? 'PURGE',
+          confirmLabel: t('forcePurge'),
+          onConfirm: (typed) =>
+            run(null, () => api('/purge', { entryId: item.entryId, typedConfirm: typed, force: true }), {
+              classify: () => ({ kind: 'ok', text: t('forcePurged'), selectedTrashIds: [] }),
+            }),
+        })
+      }
+
+      const askOrphan = (item) => {
+        setConfirm({
+          kind: 'purge-orphan',
+          items: [{ label: item.entryId }],
+          title: t('orphanPurgeTitle'),
+          description: t('orphanPurgeBody'),
+          warning: t('warnIrreversible'),
+          danger: true,
+          typedWord: policy?.purgeConfirmWord ?? 'PURGE',
+          confirmLabel: t('orphanPurge'),
+          onConfirm: (typed) =>
+            run(null, () => api('/purge-orphan', { entryId: item.entryId, typedConfirm: typed }), {
+              classify: () => ({ kind: 'ok', text: t('orphanPurged') }),
+            }),
+        })
+      }
+
+      const askRelocate = (entryId, originalRoot, currentRoot) => {
+        setConfirm({
+          kind: 'relocate',
+          items: [],
+          title: t('rootChangedTitle'),
+          description: t('rootChangedBody', { original: originalRoot, current: currentRoot }),
+          confirmLabel: t('relocateAction'),
+          onConfirm: () =>
+            run(null, () => api('/restore', { entryId, relocate: true }), {
+              classify: (result) => ({
+                kind: result.partial ? 'warn' : 'ok',
+                text: result.partial
+                  ? t('restoredPartial', { n: result.warnings?.length || 1 })
+                  : t('relocated'),
+              }),
+            }),
         })
       }
 
@@ -1150,6 +1657,7 @@ __ModuleLoader__.load({
 
       const askProcessPending = () => {
         const count = pending.length
+        const sessionIds = pending.map((item) => item.sessionId)
         setConfirm({
           kind: 'process-pending',
           items: pending,
@@ -1159,11 +1667,21 @@ __ModuleLoader__.load({
           confirmLabel: t('processPending'),
           onConfirm: () =>
             run(
-              (result) =>
-                result.remaining > 0
-                  ? t('processedPartial', { n: result.succeeded, m: result.remaining })
-                  : t('processedN', { n: result.succeeded }),
-              () => api('/process-pending', { confirmCount: count }),
+              null,
+              () => api('/process-pending', { confirmCount: count, sessionIds }),
+              {
+                classify: (result) => {
+                  const rows = (result.results || []).filter((row) => row.result !== 'trashed')
+                  return {
+                    kind: result.remaining > 0 ? 'warn' : 'ok',
+                    text:
+                      result.remaining > 0
+                        ? t('processedPartial', { n: result.succeeded, m: result.remaining })
+                        : t('processedN', { n: result.succeeded }),
+                    details: rows.slice(0, 6).map((row) => `${row.sessionId}：${row.result}${row.code ? ` (${row.code})` : ''}`),
+                  }
+                },
+              },
             ),
         })
       }
@@ -1220,20 +1738,6 @@ __ModuleLoader__.load({
         group.items.push(s)
       }
 
-      const blockedLabel = (reason) => {
-        switch (reason) {
-          case 'live': return t('live')
-          case 'unknown': return t('unknown')
-          case 'disabled': return t('reasonDisabled')
-          case 'protected': return t('reasonProtected')
-          case 'subagent-protected': return t('reasonSubagentProtected')
-          case 'pinned-protected': return t('reasonPinnedProtected')
-          case 'archived-protected': return t('reasonArchivedProtected')
-          case 'ambiguous': return t('ambiguous')
-          default: return t('protected')
-        }
-      }
-
       const toggle = (setter, id) => {
         setter((prev) => {
           const next = new Set(prev)
@@ -1244,21 +1748,35 @@ __ModuleLoader__.load({
       }
       const toggleGroup = (group) => {
         const deletable = group.items.filter((s) => s.deletable).map((s) => s.id)
-        setSelected((prev) => {
-          const next = new Set(prev)
-          const allSelected = deletable.every((id) => next.has(id))
-          for (const id of deletable) {
-            if (allSelected) next.delete(id)
-            else next.add(id)
-          }
-          return next
-        })
+        const allSelected = deletable.length > 0 && deletable.every((id) => selected.has(id))
+        if (allSelected) {
+          const next = new Set(selected)
+          for (const id of deletable) next.delete(id)
+          setSelected(next)
+          return
+        }
+        const next = new Set(selected)
+        const max = Number(policy?.maxBatchSize) || 50
+        for (const id of deletable) {
+          if (next.size >= max) break
+          next.add(id)
+        }
+        setSelected(next)
+        if (deletable.some((id) => !next.has(id))) {
+          setNotice({ kind: 'warn', text: t('batchLimitHint', { n: max }) })
+        }
       }
       const selectAllFiltered = () => {
-        const ids = sorted.filter((s) => s.deletable).map((s) => s.id)
+        const eligible = sorted.filter((s) => s.deletable)
+        const max = Number(policy?.maxBatchSize) || 50
+        const ids = eligible.slice(0, max).map((s) => s.id)
         setSelected(new Set(ids))
-        const skipped = sorted.length - ids.length
-        if (skipped > 0) setNotice({ kind: 'warn', text: t('selectedBlocked', { n: skipped }) })
+        if (eligible.length > max) {
+          setNotice({ kind: 'warn', text: t('batchLimitHint', { n: max }) })
+        } else {
+          const skipped = sorted.length - eligible.length
+          if (skipped > 0) setNotice({ kind: 'warn', text: t('selectedBlocked', { n: skipped }) })
+        }
       }
       const toggleCollapse = (key) => {
         setCollapsed((prev) => {
@@ -1271,10 +1789,20 @@ __ModuleLoader__.load({
       }
 
       const selectedSessions = sessions.filter((s) => selected.has(s.id))
+      const visibleIds = new Set(sorted.map((s) => s.id))
+      const selectedVisible = selectedSessions.filter((s) => visibleIds.has(s.id))
+      const selectedHidden = selectedSessions.length - selectedVisible.length
       const selectedBytes = selectedSessions.reduce((sum, s) => sum + (Number(s.bytes) || 0), 0)
-      // 只有"没被策略挡住"的条目才允许被彻底删除 / 被全选
+      const maxBatch = Number(policy?.maxBatchSize) || 50
+      // 选择状态与"各操作是否有资格"分离：受保护/禁止 purge 的条目仍可被勾选，
+      // 由具体动作决定跳过或阻止。
+      const restorableTrash = trash.filter((x) => !x.broken && !x.incomplete && x.complete !== false)
       const purgeableTrash = trash.filter((x) => !x.purgeBlockedReason && policy?.allowPurge !== false)
-      const selectedTrashItems = purgeableTrash.filter((x) => selectedTrash.has(x.entryId))
+      const selectableTrash = trash.filter((x) => restorableTrash.includes(x) || purgeableTrash.includes(x))
+      const selectedTrashItems = trash.filter((x) => selectedTrash.has(x.entryId))
+      const selectedPurgeable = selectedTrashItems.filter((x) => purgeableTrash.includes(x))
+      const selectedRestorable = selectedTrashItems.filter((x) => restorableTrash.includes(x))
+      const selectedTrashOver = selectedTrash.size > maxBatch
       const selectedTrashBytes = selectedTrashItems.reduce((sum, x) => sum + (Number(x.bytes) || 0), 0)
 
       const policyChips = []
@@ -1292,6 +1820,13 @@ __ModuleLoader__.load({
         )
         policyChips.push(h(Chip, { key: 'mb' }, t('policyBatchLimit', { n: policy.maxBatchSize })))
         policyChips.push(h(Chip, { key: 'tc' }, t('policyTypedConfirm', { n: policy.requireTypedConfirmAt })))
+        policyChips.push(
+          h(
+            Chip,
+            { key: 'pq' },
+            policy.processPendingOnStartup ? t('policyQueuedAuto') : t('policyQueuedManual'),
+          ),
+        )
       }
 
       const sessionCard = (s) => {
@@ -1311,6 +1846,8 @@ __ModuleLoader__.load({
         const meta = [`${t('size')} ${formatBytes(s.bytes)}`, `${t('updated')} ${formatTime(s.updatedAt)}`, s.id].join(' · ')
         const queued = pendingIds.has(s.id)
         const isLive = s.liveness !== 'free'
+        const queueLabel = policy?.processPendingOnStartup ? t('queueAuto') : t('queueManual')
+        const queuedLabel = policy?.processPendingOnStartup ? t('queuedAuto') : t('queuedManual')
         return h(
           'div',
           { className: `dsm-card${selected.has(s.id) ? ' dsm-cardSel' : ''}`, key: s.id },
@@ -1334,13 +1871,13 @@ __ModuleLoader__.load({
               ? (policy?.enabled === false
                 ? null // 只读模式下排队也没有意义（启动时同样会被策略拒绝）
                 : queued
-                  ? h(Button, { label: t('unqueue'), variant: 'outline', small: true, disabled: busy, onClick: () => run(t('queuedOff'), () => api('/unqueue', { id: s.id })) })
-                  : h(Button, { label: t('queue'), variant: 'outline', small: true, disabled: busy, onClick: () => run(t('queued'), () => api('/queue', { id: s.id })) }))
+                  ? h(Button, { label: t('unqueue'), variant: 'outline', small: true, disabled: busy || policy?.enabled === false, onClick: () => run(t('queuedOff'), () => api('/unqueue', { id: s.id })) })
+                  : h(Button, { label: queueLabel, variant: 'outline', small: true, disabled: busy || policy?.enabled === false, onClick: () => run(queuedLabel, () => api('/queue', { id: s.id })) }))
               : h(Button, {
                   label: t('delete'),
                   variant: 'danger',
                   small: true,
-                  disabled: busy || !s.deletable,
+                  disabled: busy || !s.deletable || policy?.enabled === false,
                   title: s.deletable ? t('delete') : blockedLabel(s.blockedReason),
                   onClick: () => askTrash([s]),
                 })),
@@ -1349,13 +1886,17 @@ __ModuleLoader__.load({
 
       const purgeBlockedText = (reason) => {
         switch (reason) {
+          case 'config-invalid': return t('errConfigInvalid')
           case 'disabled': return t('reasonDisabled')
           case 'purge-disabled': return t('policyNoPurge')
           case 'protected': return t('reasonProtected')
           case 'subagent-protected': return t('reasonSubagentProtected')
+          case 'kind-unknown': return t('errKindUnknown')
+          case 'protection-unknown': return t('errProtectionUnknown')
           case 'orphan': return t('reasonOrphan')
-          case 'incomplete': return t('trashIncomplete')
-          case 'broken': return t('trashIncomplete')
+          case 'incomplete': return t('errIncomplete')
+          case 'broken': return t('errBroken')
+          case 'refs-pending': return t('errRefsPending')
           default: return t('protected')
         }
       }
@@ -1364,11 +1905,14 @@ __ModuleLoader__.load({
         const meta = [`${t('size')} ${formatBytes(item.bytes)}`, `${t('deletedAt')} ${formatStamp(item.deletedAt)}`, item.sessionId].join(' · ')
         const blockedReason = item.purgeBlockedReason || (policy?.allowPurge === false ? 'purge-disabled' : null)
         const blocked = Boolean(blockedReason)
+        const restorable = !item.broken && !item.incomplete && item.complete !== false
+        const selectable = restorable || !blocked
         const badges = []
         if (blocked) badges.push(h('span', { key: 'lock', className: 'dsm-badge dsm-badge-lock' }, t('protected')))
-        if (item.complete === false) badges.push(h('span', { key: 'inc', className: 'dsm-badge dsm-badge-unknown' }, t('trashIncomplete')))
+        if (item.incomplete || item.complete === false) badges.push(h('span', { key: 'inc', className: 'dsm-badge dsm-badge-unknown' }, t('trashIncomplete')))
         if (item.refsPending) badges.push(h('span', { key: 'refs', className: 'dsm-badge dsm-badge-unknown' }, t('refsPending')))
         if (item.broken) badges.push(h('span', { key: 'broken', className: 'dsm-badge dsm-badge-lock' }, t('trashIncomplete')))
+        if (item.projectionFiles > 0) badges.push(h('span', { key: 'proj', className: 'dsm-badge' }, `${item.projectionFiles} × cache`))
         return h(
           'div',
           { className: `dsm-card${selectedTrash.has(item.entryId) ? ' dsm-cardSel' : ''}`, key: item.entryId },
@@ -1376,8 +1920,8 @@ __ModuleLoader__.load({
             className: 'dsm-check',
             type: 'checkbox',
             checked: selectedTrash.has(item.entryId),
-            disabled: busy || blocked,
-            title: blocked ? purgeBlockedText(blockedReason) : undefined,
+            disabled: busy || !selectable,
+            title: !selectable ? purgeBlockedText(blockedReason) : undefined,
             'aria-label': item.title || item.sessionId,
             onChange: () => toggle(setSelectedTrash, item.entryId),
           }),
@@ -1390,18 +1934,47 @@ __ModuleLoader__.load({
               label: t('restore'),
               variant: 'outline',
               small: true,
-              disabled: busy || item.broken === true,
-              title: item.broken ? t('trashIncomplete') : t('restore'),
-              onClick: () => run(t('restored'), () => api('/restore', { entryId: item.entryId })),
+              disabled: busy || !restorable,
+              title: restorable ? t('restore') : t('trashIncomplete'),
+              onClick: () =>
+                run(null, () => api('/restore', { entryId: item.entryId }), {
+                  classify: (result) =>
+                    result.partial
+                      ? { kind: 'warn', text: t('restoredPartial', { n: result.warnings?.length || 1 }), details: result.warnings?.slice(0, 6) }
+                      : { kind: 'ok', text: t('restored') },
+                  onError: (err) => {
+                    if (err.code === 'root-changed') {
+                      return {
+                        label: t('relocateAction'),
+                        onClick: () => askRelocate(item.entryId, err.details?.originalRoot ?? '—', err.details?.currentRoot ?? '—'),
+                      }
+                    }
+                    if (err.code === 'broken' || err.code === 'incomplete') {
+                      return { label: t('forcePurge'), onClick: () => askForcePurge(item) }
+                    }
+                    return null
+                  },
+                }),
             }),
-            h(Button, {
-              label: t('purge'),
-              variant: 'danger',
-              small: true,
-              disabled: busy || blocked,
-              title: blocked ? purgeBlockedText(blockedReason) : t('purge'),
-              onClick: () => askPurge([item]),
-            })),
+            blocked
+              ? (item.forcePurgeAllowed
+                  ? h(Button, {
+                      label: t('forcePurge'),
+                      variant: 'danger',
+                      small: true,
+                      disabled: busy || policy?.enabled === false,
+                      title: t('forcePurge'),
+                      onClick: () => askForcePurge(item),
+                    })
+                  : null)
+              : h(Button, {
+                  label: t('purge'),
+                  variant: 'danger',
+                  small: true,
+                  disabled: busy || policy?.enabled === false,
+                  title: t('purge'),
+                  onClick: () => askPurge([item]),
+                })),
         )
       }
 
@@ -1441,11 +2014,30 @@ __ModuleLoader__.load({
             andMoreLabel: (total, hidden) => t('andMore', { n: total, m: hidden }),
             typedLabel: (word) => t('typedConfirmLabel', { word }),
             typedPlaceholder: t('typedConfirmPlaceholder'),
+            busyHint: t('busyHint'),
             busy,
             onCancel: () => setConfirm(null),
             onConfirm: (typed) => confirm.onConfirm(typed),
           })
         : null
+
+      const downloadDiagnostics = async () => {
+        try {
+          const report = await api('/diagnostics')
+          const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = `dsh-delete-guard-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+          document.body.appendChild(anchor)
+          anchor.click()
+          anchor.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 1000)
+          setNotice({ kind: 'ok', text: t('diagnosticsDone') })
+        } catch (err) {
+          setNotice({ kind: 'err', text: `${t('diagnosticsFailed')} ${errorText(t, err)}` })
+        }
+      }
 
       const body = h(
         'div',
@@ -1460,7 +2052,46 @@ __ModuleLoader__.load({
 
         policyChips.length ? h('div', { className: 'dsm-chips' }, h('span', { className: 'dsm-muted' }, `${t('policy')}：`), ...policyChips) : null,
         notice
-          ? h('p', { className: `dsm-notice ${notice.kind === 'ok' ? 'dsm-notice-ok' : notice.kind === 'warn' ? 'dsm-notice-warn' : 'dsm-notice-err'}` }, notice.text)
+          ? h(
+              'div',
+              { className: `dsm-notice ${notice.kind === 'ok' ? 'dsm-notice-ok' : notice.kind === 'warn' ? 'dsm-notice-warn' : 'dsm-notice-err'}` },
+              h('span', null, notice.text),
+              Array.isArray(notice.details) && notice.details.length
+                ? h(
+                    'details',
+                    { className: 'dsm-noticeDetails' },
+                    h('summary', null, t('detailsTitle')),
+                    h('ul', null, notice.details.slice(0, 8).map((row, index) => h('li', { key: index }, row))),
+                  )
+                : null,
+              notice.action
+                ? h(Button, {
+                    label: notice.action.label,
+                    variant: 'outline',
+                    small: true,
+                    disabled: busy,
+                    onClick: notice.action.onClick,
+                  })
+                : null,
+            )
+          : null,
+        data?.configErrors?.length
+          ? h(
+              'div',
+              { className: 'dsm-notice dsm-notice-err' },
+              h('strong', null, `${t('configInvalidTitle')}：`),
+              t('configInvalidBody'),
+              h(
+                'ul',
+                { className: 'dsm-noticeList' },
+                data.configErrors.slice(0, 8).map((item, index) =>
+                  h('li', { key: index }, `${item.key}: ${item.got} → ${item.expected}`),
+                ),
+              ),
+            )
+          : null,
+        data?.pendingCorrupt || data?.repairsCorrupt
+          ? h('p', { className: 'dsm-notice dsm-notice-warn' }, t('errPendingCorrupt'))
           : null,
         state.status === 'error' && data
           ? h('p', { className: 'dsm-notice dsm-notice-err' }, t('unreachable', { error: state.error }))
@@ -1516,11 +2147,18 @@ __ModuleLoader__.load({
 
         selected.size
           ? h('div', { className: 'dsm-batch' },
-              h('span', { className: 'dsm-batchText' }, t('selectedCount', { n: selectedSessions.length, size: formatBytes(selectedBytes) })),
+              h('span', { className: 'dsm-batchText' }, t('visibleSelected', { n: selectedSessions.length, m: selectedVisible.length })),
+              selectedHidden > 0
+                ? h('span', { className: 'dsm-batchHint' }, t('selectedHidden', { n: selectedSessions.length, m: selectedHidden }))
+                : null,
+              selectedSessions.length > maxBatch
+                ? h('span', { className: 'dsm-batchHint' }, t('batchLimitTitle'))
+                : null,
               h(Button, {
                 label: t('batchTrash'),
                 variant: 'danger',
-                disabled: busy || selectedSessions.length === 0 || policy?.enabled === false,
+                disabled: busy || selectedSessions.length === 0 || selectedSessions.length > maxBatch || policy?.enabled === false,
+                title: selectedSessions.length > maxBatch ? t('batchLimitHint', { n: maxBatch }) : t('batchTrash'),
                 onClick: () => askTrash(selectedSessions),
               }),
               h(Button, { label: t('selectNone'), variant: 'outline', onClick: () => setSelected(new Set()) }))
@@ -1577,11 +2215,25 @@ __ModuleLoader__.load({
                           label: t('batchRestore'),
                           variant: 'outline',
                           small: true,
-                          disabled: busy,
+                          disabled: busy || selectedRestorable.length === 0 || selectedTrashOver || policy?.enabled === false,
+                          title: selectedTrashOver ? t('batchLimitHint', { n: maxBatch }) : selectedRestorable.length === 0 ? t('trashIncomplete') : t('batchRestore'),
                           onClick: () =>
                             run(
-                              (result) => t('restoredN', { n: result.succeeded ?? result.ok }),
-                              () => api('/restore-batch', { entryIds: [...selectedTrash] }),
+                              null,
+                              () => api('/restore-batch', { entryIds: selectedRestorable.map((x) => x.entryId) }),
+                              {
+                                classify: (result) => {
+                                  const rows = (result.results || []).filter((row) => !row.ok)
+                                  return {
+                                    kind: rows.length ? 'warn' : 'ok',
+                                    text: rows.length
+                                      ? t('batchPartialTitle', { n: rows.length })
+                                      : t('restoredN', { n: result.succeeded }),
+                                    details: rows.slice(0, 6).map((row) => `${row.entryId}：${errorText(t, row)}`),
+                                    selectedTrashIds: rows.map((row) => row.entryId),
+                                  }
+                                },
+                              },
                             ),
                         }),
                         h(Button, {
@@ -1589,14 +2241,21 @@ __ModuleLoader__.load({
                           label: t('batchPurge'),
                           variant: 'danger',
                           small: true,
-                          disabled: busy || purgeableTrash.length === 0,
-                          title: purgeableTrash.length === 0 ? t('policyNoPurge') : t('batchPurge'),
-                          onClick: () => askPurge(selectedTrashItems),
+                          disabled: busy || selectedPurgeable.length === 0 || selectedTrashOver || policy?.enabled === false,
+                          title: selectedTrashOver ? t('batchLimitHint', { n: maxBatch }) : selectedPurgeable.length === 0 ? t('policyNoPurge') : t('batchPurge'),
+                          onClick: () => askPurge(selectedPurgeable),
                         }),
                         h(Button, { key: 'c', label: t('selectNone'), variant: 'outline', small: true, onClick: () => setSelectedTrash(new Set()) }),
                       ]
                     : [
-                        h(Button, { key: 'sa', label: t('selectAll'), variant: 'outline', small: true, disabled: busy || purgeableTrash.length === 0, onClick: () => setSelectedTrash(new Set(purgeableTrash.map((x) => x.entryId))) }),
+                        h(Button, {
+                          key: 'sa',
+                          label: t('selectAll'),
+                          variant: 'outline',
+                          small: true,
+                          disabled: busy || selectableTrash.length === 0,
+                          onClick: () => setSelectedTrash(new Set(selectableTrash.slice(0, maxBatch).map((x) => x.entryId))),
+                        }),
                         h(Button, {
                           key: 'pa',
                           label: t('purgeAll'),
@@ -1604,19 +2263,21 @@ __ModuleLoader__.load({
                           small: true,
                           disabled: busy || purgeableTrash.length === 0,
                           title: purgeableTrash.length === 0 ? t('policyNoPurge') : t('purgeAll'),
-                          onClick: () => askPurgeAll(trash.length, trash.length - purgeableTrash.length),
+                          onClick: () => askPurgeAll(trash.map((x) => x.entryId), trash.length - purgeableTrash.length),
                         }),
                       ])
               : null),
           selectedTrash.size
-            ? h('p', { className: 'dsm-muted' }, t('selectedCount', { n: selectedTrash.size, size: formatBytes(selectedTrashBytes) }))
+            ? h('div', null,
+                h('p', { className: 'dsm-muted' }, t('selectedCount', { n: selectedTrash.size, size: formatBytes(selectedTrashBytes) })),
+                selectedTrashOver ? h('p', { className: 'dsm-batchHint' }, t('batchLimitHint', { n: maxBatch })) : null)
             : null,
           trash.length === 0 ? h('p', { className: 'dsm-muted' }, t('trashEmpty')) : trash.map(trashCard)),
 
         pending.length > 0
           ? h('div', { className: 'dsm-group' },
               h('div', { className: 'dsm-groupHead' },
-                h('h2', { className: 'dsm-groupTitle' }, t('pending')),
+                h('h2', { className: 'dsm-groupTitle' }, policy?.processPendingOnStartup ? t('pendingAuto') : t('pending')),
                 h('span', { className: 'dsm-count' }, String(pending.length)),
                 h('span', { style: { marginLeft: 'auto' } },
                   h(Button, {
@@ -1626,9 +2287,64 @@ __ModuleLoader__.load({
                     disabled: busy || pending.length === 0 || policy?.enabled === false,
                     onClick: askProcessPending,
                   }))),
-              h('p', { className: 'dsm-muted' }, t('pendingHint')),
+              h('p', { className: 'dsm-muted' }, policy?.processPendingOnStartup ? t('pendingHintAuto') : t('pendingHintManual')),
               pending.map(pendingCard))
           : null,
+
+        h('div', { className: 'dsm-group' },
+          h('div', { className: 'dsm-groupHead' },
+            h('h2', { className: 'dsm-groupTitle' }, t('orphansTitle')),
+            h('span', { className: 'dsm-count' }, String((data?.orphans ?? []).length)),
+            h('span', { style: { marginLeft: 'auto', display: 'flex', gap: '6px' } },
+              h(Button, { label: t('diagnostics'), variant: 'outline', small: true, disabled: busy, onClick: downloadDiagnostics }),
+              h(Button, {
+                label: t('retryRepairs'),
+                variant: 'outline',
+                small: true,
+                disabled: busy || policy?.enabled === false,
+                onClick: () =>
+                  run(null, () => api('/repair-refs', {}), {
+                    classify: () => ({ kind: 'ok', text: t('repairsDone') }),
+                  }),
+              }))),
+          (data?.orphans ?? []).length
+            ? (data.orphans || []).map((item) =>
+                h('div', { className: 'dsm-card', key: item.entryId },
+                  h('div', { className: 'dsm-cardMain' },
+                    h('div', { className: 'dsm-cardTitle' },
+                      h('span', { className: 'dsm-name' }, item.entryId),
+                      h('span', { className: 'dsm-badge dsm-badge-lock' }, t('trashIncomplete'))),
+                    h('div', { className: 'dsm-cardMeta' }, item.reason || 'orphan')),
+                  h('div', { className: 'dsm-actions' },
+                    h(Button, {
+                      label: t('orphanPurge'),
+                      variant: 'danger',
+                      small: true,
+                      disabled: busy || policy?.enabled === false || policy?.allowPurge === false,
+                      onClick: () => askOrphan(item),
+                    }))))
+            : h('p', { className: 'dsm-muted' }, t('orphansHint')),
+          (data?.repairs ?? []).length
+            ? h('div', null,
+                h('p', { className: 'dsm-muted' }, t('repairsHint')),
+                (data.repairs || []).slice(0, 6).map((item, index) =>
+                  h('div', { className: 'dsm-card', key: `${item.sessionId}-${index}` },
+                    h('div', { className: 'dsm-cardMain' },
+                      h('div', { className: 'dsm-cardTitle' }, h('span', { className: 'dsm-name' }, item.sessionId)),
+                      h('div', { className: 'dsm-cardMeta' }, `${item.kind} · ${item.code || item.requestedAt || ''}`)))))
+            : null,
+          h('details', { className: 'dsm-details' },
+            h('summary', null, t('recoveryTitle')),
+            h('p', { className: 'dsm-muted' },
+              data?.sweep
+                ? t('sweepSummary', { removed: data.sweep.removed ?? 0, skipped: data.sweep.skipped ?? 0 })
+                : t('sweepHint')),
+            (data?.recovery ?? []).length
+              ? h('ul', null, data.recovery.slice(0, 10).map((row, index) => h('li', { key: index }, `${row.result || row.code || ''} ${row.reason || ''}`)))
+              : h('p', { className: 'dsm-muted' }, t('recoveryHint')),
+            (data?.startup ?? []).length
+              ? h('ul', null, data.startup.slice(0, 10).map((row, index) => h('li', { key: index }, `${row.sessionId || ''} ${row.result || ''} ${row.code || ''}`)))
+              : null)),
 
         data
           ? h('p', { className: 'dsm-foot' }, t('paths', { sessions: data.sessionsRoot, data: data.dataDir, log: data.logFile }))
@@ -1639,6 +2355,63 @@ __ModuleLoader__.load({
     }
 
     // ───────────────────────── 插件体 ─────────────────────────
+    // The 0.2.1 Host command descriptor has no `icon` field, and a client
+    // command contribution cannot share the host's `/sessions` name. Decorate
+    // the rendered menu row instead: this keeps every `/sessions` subcommand
+    // working while giving the row the same 14px visual treatment as the
+    // first-party commands.
+    const COMMAND_ICON_SVG =
+      '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<path d="M1.28149 3.88831H14.7187" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+      '<path d="M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+      '<path d="M2.57349 3.88831L3.19366 13.2943C3.21937 13.5502 3.33952 13.7872 3.53065 13.9593C3.72178 14.1313 3.97016 14.2259 4.22729 14.2246H11.7728C12.0299 14.2259 12.2783 14.1313 12.4694 13.9593C12.6605 13.7872 12.7807 13.5502 12.8064 13.2943L13.4266 3.88831" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+      '<path d="M6.44946 6.98926V11.1238" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+      '<path d="M9.55054 6.98926V11.1238" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>' +
+      '</svg>'
+    function installCommandIconDecorator() {
+      if (typeof document === 'undefined' || typeof MutationObserver !== 'function' || !document.body) {
+        return () => {}
+      }
+      let scheduled = false
+      const decorate = () => {
+        scheduled = false
+        let buttons = []
+        try {
+          buttons = [...document.querySelectorAll('button[role="option"]')]
+        } catch {
+          return
+        }
+        for (const button of buttons) {
+          if (button.querySelector('.dsm-commandIcon')) continue
+          if (button.querySelector('svg')) continue
+          const text = button.textContent || ''
+          if (!text.includes('sessions') || !text.includes('会话管理')) continue
+          const icon = document.createElement('span')
+          icon.className = 'dsm-commandIcon'
+          icon.setAttribute('aria-hidden', 'true')
+          icon.innerHTML = COMMAND_ICON_SVG
+          button.insertBefore(icon, button.firstChild)
+        }
+      }
+      const schedule = () => {
+        if (scheduled) return
+        scheduled = true
+        const run = () => {
+          if (!scheduled) return
+          decorate()
+        }
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(run)
+        } else {
+          setTimeout(run, 0)
+        }
+      }
+      const observer = new MutationObserver(schedule)
+      observer.observe(document.body, { childList: true, subtree: true })
+      schedule()
+      return () => observer.disconnect()
+    }
+
     function apply(ctx) {
       pluginCtx = ctx
       ctx.effect(
@@ -1660,6 +2433,10 @@ __ModuleLoader__.load({
           }
         }
       }, 'dsh-delete-guard: styles')
+
+      // Decorate the Host-rendered `/sessions` row (the host descriptor has no
+      // icon field in 0.2.1). Purely visual; command execution is unchanged.
+      ctx.effect(() => installCommandIconDecorator(), 'dsh-delete-guard: slash icon')
 
       // 入口 1：侧边栏面板
       ctx.slots.inject('sidebar.panellist', () =>

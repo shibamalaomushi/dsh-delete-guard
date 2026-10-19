@@ -7,6 +7,87 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-19
+
+针对 25 项服务端/策略/持久性问题（R01–R25）和 12 项交互问题（U01–U12）的审查与修复。
+本版本包含行为变更：只读模式覆盖全部写操作、默认要求会话身份校验、永久删除默认要求审计写入成功。
+
+### Security
+
+- **R01 活跃竞态**：异步活动检查后重新锚定目录/身份，rename 后再次复查活跃状态；若已活跃立即把正文移回，
+  返回 409 而不是静默删除。跨进程窗口仍受宿主写租约限制。
+- **R02 保护状态未知**：registry 的置顶/归档 getter 或 workspace.json 读数失败时记录 `pinnedKnown/archivedKnown`；
+  保护开启且状态未知按 `protection-unknown` 拒绝，不再退回空集合放行。
+- **R03 配置类型**：严格校验类型/范围；`enabled:"false"` 等错误配置进入 `configErrors`，所有变更返回 503
+  `config-invalid`，绝不静默采用宽松默认值。
+- **R04 启动恢复**：不再在恢复中递归 `rmSync` 条目；空/不完整/投影残留只标记并保留，由用户显式强制清理。
+- **R05 事务恢复**：meta v3 阶段（prepared/payload-moved/projections-moved/refs-pending/complete/restoring/
+  restored-payload）；恢复核对 payload、投影目录和引用，投影清单从磁盘补全，refs 不会因崩溃而丢失。
+- **R06/R07 投影搬移/还原**：逐文件记录进度；部分失败回滚所有已搬文件，目标冲突保留副本；还原冲突标记
+  `partial` 并保留回收站条目，不再删除未恢复的缓存。
+- **R08 投影清单**：移除静默 `slice(0,32)`；移动前检查 512 上限并明确 413，还原时扫描目录补全，超限保留剩余。
+- **R09/R10 确认绑定**：批量删除/purge 必须提供 `confirmCount`；清空回收站提交 `entryIds` 精确集合，
+  排队执行提交 `sessionIds` 精确集合；集合变化返回 `stale`。
+- **R11/R12 身份**：`createdAt` 只接受安全整数，null/缺失不再变成 0；索引读取失败或 header 缺失时保留队列并
+  标 `identity-unknown`，不再跳过比较直接删除；支持从日志首行（含大 zstd 文件的首帧）恢复 header。
+- **R13 引用恢复**：原工作区不存在/方法不可用时返回警告并进入修复队列，`refs:false`，不再误报成功。
+- **R14 清理顺序**：启动先 `retryPendingAttaches`/`retryPendingRefs` 再 sweep；自动清理跳过 `refsPending`。
+- **R15 存储健壮性**：pending/repair 损坏时隔离（`.corrupt-*`）而非覆盖；容量满报错，不再静默截断；
+  修复项按 `kind+sessionId+operationId` 去重。
+- **R16 提交后失败**：payload 已提交后，pending/repair/meta/日志失败不再返回匿名 500；返回 `committed:true`、
+  `entryId`、`warnings`/`failures`；还原同样保留部分结果。
+- **R17 根切换**：还原比较 meta.sessionsRoot 与当前根，默认返回 409 `root-changed`；显式 `relocate:true`
+  才迁移到当前根并给出警告。
+- **R18 会话身份**：日志名必须是普通文件；删除/排队/还原用宿主索引或日志 header 核验 `id/createdAt/cwd`；
+  `requireVerifiedSession: true` 时未验证目录拒绝删除。
+- **R19 分类一致**：列表、策略、回收站 meta 使用同一 header 分类（`origin/parentSession`），
+  `allowSubagentDelete:false` 不再被 `session-` 前缀绕过。
+- **R20 损坏条目**：purge 操作时重新检查 payload/phase，不再依赖启动时写入的 `broken`；损坏/不完整/refsPending
+  的普通清理一律拒绝，单独提供强制清理并强制输入确认词。
+- **R21 路径根**：HOME、session-manager、trash、投影缓存根、workspace.json 全部规范化并拒绝链接；
+  projection/rollback 前重新校验根，删除/恢复不再跟随链接根。
+- **R22 认证回退**：无 connection 栅栏时要求 TCP 对端是回环地址，拒绝远程伪造 `Host: 127.0.0.1`；
+  拒绝事件写审计。
+- **R23 审计**：记录认证拒绝、命令失败、逐项批量结果；`log()` 返回布尔值，永久删除/自动清理默认要求
+  审计 intent 写入成功（`auditRequiredForPurge: true`），可还原操作不被审计故障阻塞。
+- **R24 持久化**：fsync 区分“平台不支持”和真实 I/O 错误；文件和目录 fsync 尽力而为并记录能力；
+  事务阶段 + 启动恢复缩小断电窗口，文档不再声称整个流程原子。
+- **R25 规模**：一次扫描/活跃度快照；`childCount` 预计算；批量共享 scanHint；有索引时跳过目录字节遍历；
+  客户端轮询降到 60 秒。同步全量扫描仍是已知边界。
+
+### Fixed（交互）
+
+- **U01/U02**：行内入口请求保留到列表就绪，过期/找不到/受保护都有明确提示；`blockedLabel` 提前定义，
+  消除首次 loading 渲染闭包 TDZ；bus 不再吞掉入口异常。
+- **U03**：`/list` 请求序号，只有最新响应能覆盖状态。
+- **U04**：批量部分失败显示 warn/err、逐项原因，保留失败项并支持“仅重试失败项”。
+- **U05**：回收站选择与 purge 资格解耦；可还原但禁止 purge 的条目也能批量还原。
+- **U06**：遮罩点击关闭、Tab/Shift+Tab 焦点圈定、关闭恢复焦点、小屏滚动；提交期间禁用关闭。
+- **U07**：删除确认显示子会话将保留为孤立记录的数量。
+- **U08**：活动/活跃度拒绝时提供“排入待删除”下一步，并显示活动类型。
+- **U09**：新增异常条目、修复队列、上次清理、启动恢复和脱敏诊断导出。
+- **U10**：全选不超过 `maxBatchSize`，显示已选/可见/隐藏数量，超限时禁用并提示。
+- **U11**：排队文案由 `processPendingOnStartup` 驱动；服务端错误按 code 本地化；只读/purge/审计等状态
+  在策略条中可见。
+- **U12**：`/sessions` 的 Host 命令描述符没有 icon 字段，client contribution 又不能与 Host 命令同名；
+  2.1.0 用纯视觉的菜单行装饰器给 Host 渲染的 `/sessions` 行补上 14px 图标，保留全部子命令；
+  上游增加 icon/face registry 后可删除装饰器。
+
+### Added
+
+- `test/regression-2.1.mjs`：R01–R23 的故障注入回归。
+- `test/client-runtime.mjs`：客户端半身最小运行时冒烟。
+- `/diagnostics`（默认脱敏）、`/purge-orphan`、强制 purge 和根迁移 UI。
+- `requireVerifiedSession`、`auditRequiredForPurge` 配置。
+- 修复队列/异常条目/清理报告/启动恢复的诊断视图。
+
+### Changed
+
+- 只读模式现在也阻止还原、取消排队、修复重试和启动恢复写入。
+- 默认 `requireVerifiedSession: true`、`auditRequiredForPurge: true`；升级后请检查旧配置类型和损坏数据。
+- 回收站 meta v3；旧 v2 条目可读，新条目写入阶段/投影/身份字段。
+- 默认排队仍不自动执行；`processPendingOnStartup: true` 才在下次启动处理。
+
 ## [2.0.0] - 2026-10-17
 
 适配 DeepSeek Harness `0.2.1-rc.2`，并完成一次针对删除/还原/清理链路的对抗式安全审查。

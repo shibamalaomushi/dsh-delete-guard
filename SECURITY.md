@@ -4,8 +4,9 @@
 
 | 版本 | 是否接收安全修复 |
 | --- | --- |
-| 2.0.x | 是（当前版本；适配 DSH 0.2.1-rc.2） |
-| 1.3.x | 否（请升级；2.0.0 修复了回收站元数据路径覆盖、自动清理绕过策略、还原路径链接/跨盘绕过、批量误报、确认词缺口、workspace 直接改写等问题） |
+| 2.1.x | 是（当前版本；适配 DSH 0.2.1-rc.2） |
+| 2.0.x | 否（请升级；2.1.0 修复了活跃竞态、保护状态 fail-open、严格配置、恢复误删、投影回滚/冲突、确认集合、身份校验、根链接、远程对端与强审计等问题） |
+| 1.3.x | 否（请升级） |
 | < 1.3 | 否 |
 
 ## 如何报告漏洞
@@ -37,35 +38,41 @@
 
 ### 设计上的防线（可作为评审基准）
 
-1. 目标是真实会话根下的直接子目录，目录名匹配严格格式，且目录里真的装着会话日志
-   （`session*.jsonl[.zstd]`）。会话根默认取 `ctx.sessionPersistence.root`，也可用 `config.sessionsRoot`
-   显式覆盖；不再重实现 0.2.1 的 projectKey。
-2. 删除默认是**同一卷内的原子 `rename` 到回收站**，条目带 v2 `meta.json`；「彻底删除」需显式调用。
+1. 目标是真实会话根下的直接子目录，目录名匹配严格格式，且目录里真的有**普通文件**会话日志
+   （`session*.jsonl[.zstd]`）；同名子目录不算。默认用宿主索引或日志首行 header 核验 `id/createdAt/cwd`
+   （`requireVerifiedSession: true`），不可验证时拒绝。会话根默认取 `ctx.sessionPersistence.root`，
+   也可用 `config.sessionsRoot` 显式覆盖。
+2. 删除默认是**同一卷内的原子 `rename` 到回收站**，条目带 v3 事务 `meta.json`；「彻底删除」需显式调用。
+   搬移/还原按 `prepared → payload-moved → projections-moved → refs-pending → complete` 落盘，崩溃后按阶段恢复。
 3. **回收站条目目录永远由目录项推导**：`meta.json` 的 `dir`/`entryId` 不能改变实际路径；meta 必须与
    `entryId`/`sessionId` 一致，否则按 orphan 跳过。
 4. **所有路径做真实校验**：先词法检查，再 `realpath` + 逐层 `lstat`；拒绝 symlink/junction 祖先、跨盘
-   绝对路径、悬空链接目标；还原目标只用 `workspaceSlug + sessionDirName` 重建，`originalPath` 只做一致性校验。
+   绝对路径、悬空链接目标。HOME、session-manager、trash、投影缓存根和 workspace.json 也先规范化/拒绝链接；
+   还原目标只用 `workspaceSlug + sessionDirName` 重建，`originalPath` 只做一致性校验。
 5. 活跃判定使用内核权威读数（`ctx.sessions`），并咨询 `workspace/session-activity`（回合、后台任务、
-   子代理、定时任务）；有 workspace 注册表但活动读数失败时 **fail-closed**。单条、批量、命令、排队执行
-   共用同一道闸门。
-6. 所有写操作优先委托宿主的 `connection.requestRejection`（0.2.1 支持 trustedHosts/TLS/认证）；不可用时
-   回退到回环 Host + 同源校验，拒绝 `Sec-Fetch-Site: cross-site`、异源与 `Origin: null`；校验器自身出错
-   按拒绝处理。
+   子代理、定时任务）；有 workspace 注册表但活动读数失败时 **fail-closed**。异步等待后重新锚定目录并复查；
+   rename 后若发现已活跃则回滚正文。单条、批量、命令、排队执行共用同一道闸门。
+6. 所有写操作优先委托宿主的 `connection.requestRejection`；不可用时要求 TCP 对端本身是回环地址
+   （`socket.remoteAddress`），再叠加回环 Host + 同源校验，拒绝 `Sec-Fetch-Site: cross-site`、异源与
+   `Origin: null`；校验器自身出错按拒绝处理。仅伪造 `Host` 不能通过。
 7. HTTP 接口不使用 `/api` 前缀，避免因"最长前缀匹配"越过内核自身的鉴权。
 8. **策略闸门在服务端强制**：`enabled`、`allowPurge`、`allowSubagentDelete`、`protectPinned`、
    `protectArchived`、`protectedSessionIds` 全部由 Host 判定，界面禁用只是提示；策略违规先于参数校验返回。
-   单条删除、批量删除、彻底删除、清空回收站、自动清理、列表标记共用同一判定函数
-   （`policyBlockForId` / `trashPolicyRejection`）。
+   单条删除、批量删除、彻底删除、清空回收站、自动清理、列表标记共用同一判定函数；子代理/主会话分类
+   使用同一份 header 证据并持久化到回收站 meta。保护开启但权威状态读不出来时按 `protection-unknown` 拒绝。
 9. **自动清理也是删除**：超期清理逐条过策略；只读/禁彻底删除/受保护/子代理/归档/置顶/orphan/不完整/
-   损坏条目一律跳过并报告。
+   损坏/refsPending 条目一律跳过并报告。
 10. **确认规则完整服务端强制**：单条 `/purge`、批量 purge、清空回收站都按 `requireTypedConfirmAt` 校验
-    确认词；批量动作有 `confirmCount` 证明；清空回收站额外做条数 TOCTOU 校验。
-11. **不可归属的东西不销毁**：回收站条目若没有可读且一致的 `meta.json`，既不列出也不清除，只报为
-    `orphan`；正常路径不会产生这类残留（meta 在正文之前落盘）。
+    确认词；批量动作必须有 `confirmCount`；清空回收站提交 `entryIds` 精确集合，排队执行提交 `sessionIds`
+    精确集合，集合变化返回 `stale`，不按数量误删新条目。
+11. **不可归属的东西不销毁**：回收站条目若没有可读且一致的 `meta.json`，不参与自动清理，只在异常条目
+    视图里报为 `orphan`；显式清理必须输入确认词。启动恢复不会递归删除空/不完整条目。
 12. **0.2.1 引用走注册表**：通过 `ctx.workspaceRegistry` 的 detach/attach/archive/pin 更新；不直接改写
-    storage-json 的 `workspace.json`（single 布局以内存为权威，外部改写会被覆盖并可能损坏领域）。
-13. 所有动作写审计日志；日志有大小上限与轮转，单行有上限，写失败通过 `/list` 暴露。
-14. 所有变更操作串行化；路径校验与目标不存在检查在 rename 前复查。
+    storage-json 的 `workspace.json`。方法缺失/工作区消失会警告并进入修复队列，不再误报成功。
+13. 所有动作尽量写审计日志；日志有大小上限与轮转，单行有上限。默认 `auditRequiredForPurge: true`：
+    永久删除和自动清理在审计 intent 写入失败时拒绝；可还原操作只记录警告。
+14. 所有变更操作串行化；路径校验与目标不存在检查在 rename 前复查；跨卷返回明确 `cross-device`，
+    不做隐式复制降级。
 
 ## 数据面
 
@@ -81,12 +88,21 @@
 - **本地同权限攻击者**：能直接写 `.dsh` 的攻击者本来就能直接删文件；本插件不承诺用 HMAC 防住这种
   同权限攻击。它保证的是"可篡改元数据不会被放大成任意路径删除/写入"。
 - **跨进程占用无法探测**：Windows 上内核的会话写租约是"具名内核信号量、无文件痕迹"，第三方插件无法
-  可靠探测，也不应去探测。因此"另一个 DSH 实例正在写同一条会话"只能靠「排入重启后删除」规避。
+  可靠探测，也不应去探测。因此"另一个 DSH 实例正在写同一条会话"只能靠「排入待删除」规避；rename 后
+  复查只能缩小窗口，不能证明跨进程互斥。
 - **0.2.1 workspace 以内存为权威**：直接改 `workspace.json` 不会即时被宿主看见，下一次宿主写入会覆盖。
   插件的 0.2.1 主路径是 `workspaceRegistry`；旧文件回退仅用于没有注册表的组合。
-- **回收站不跨卷**：`rename` 要求回收站与会话根在同一磁盘卷；跨卷时返回明确错误，不做复制降级。
+- **回收站不跨卷**：`rename` 要求回收站与会话根在同一磁盘卷；跨卷返回明确 `cross-device`，不做复制降级。
 - **TOCTOU**：同用户进程在路径检查与 `rename` 之间抢建 junction/symlink 的赛跑无法用普通 Node API
   完全消除；插件会在检查后、rename 前复查，但这属于本地写权限边界。
+- **Windows 持久化**：文件 fsync 可用；目录 fsync 在 Windows 不支持，跨断电的 rename 持久性仍是尽力而为；
+  事务阶段与启动恢复用于缩小窗口，而不是声称整个流程原子。
+- **大目录扫描**：列表仍是同步全量扫描（已消除 O(n²) 子会话/活跃度计算，批量共享一次扫描）；超大 profile
+  可能阻塞事件循环。
+- **队列身份未知**：历史队列若既没有 `createdAt` 也没有 `cwd`，执行时会保留为 `identity-unknown`，
+  需要用户取消或人工确认；不会为了清空队列而跳过身份比较。
+- **斜杠命令图标**：0.2.1 的 Host 命令描述符没有 icon 字段；客户端对 Host 渲染的 `/sessions` 行做纯视觉装饰
+  （不改变命令解析/执行）。这是 UI 兼容层，上游支持 icon/face registry 后可移除。
 - **`DSH_HOME` 启动环境**：插件按官方 `@deepseek-ai/dsh-home-paths` 的优先级解析并优先使用
   `sessionPersistence.root`，但宿主进程启动时已被恶意设置的 `DSH_HOME` 属于宿主信任边界，插件无法完全
   修复；可用 `config.dshHome`/`config.sessionsRoot` 显式固定。

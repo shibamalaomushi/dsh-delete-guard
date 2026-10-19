@@ -15,6 +15,7 @@ import {
   isSamePath,
   resolveDshHome,
   resolveUnderRoot,
+  stripLongPathPrefix,
 } from '../lib/paths.js'
 
 let pass = 0
@@ -57,6 +58,8 @@ check('isSamePath 忽略 Windows 大小写', process.platform !== 'win32' || isS
 if (process.platform === 'win32') {
   check('Windows 跨盘路径不是 inside', !isPathInside('C:\\session-abc123', 'E:\\dsh\\sessions'))
   check('Windows 跨盘相对结果不会被当成两段子路径', !isPathInside('C:\\session-abc123', 'E:\\dsh\\sessions'))
+  check('UNC 长路径前缀还原为绝对 UNC 路径', stripLongPathPrefix('\\\\?\\UNC\\server\\share\\sessions') === '\\\\server\\share\\sessions')
+  check('普通长路径前缀仍被剥离', stripLongPathPrefix('\\\\?\\E:\\dsh\\sessions') === 'E:\\dsh\\sessions')
 }
 
 let thrown = false

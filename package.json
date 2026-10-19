@@ -1,9 +1,9 @@
 {
   "name": "dsh-delete-guard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "受控删除与回收站：默认移入可还原的回收站，提供 11 项服务端强制的删除策略、分级安全确认与全程审计日志；支持批量删除、多入口（面板/会话行/斜杠命令）与活跃会话保护。适配 DeepSeek Harness 0.2.1-rc.2。 | Guarded session deletion for DSH: recoverable trash, server-enforced deletion policy, graded confirmation, audit log with rotation, batch actions and live-session protection. Compatible with DSH 0.2.1-rc.2.",
+  "description": "受控删除与回收站：默认移入可还原的回收站，服务端强制删除策略、分级确认、事务化搬移/还原与强审计；支持批量、多入口（面板/会话行/斜杠命令）、身份校验与崩溃恢复。适配 DeepSeek Harness 0.2.1-rc.2。 | Guarded session deletion for DSH: recoverable trash, server-enforced deletion policy, transactional move/restore, identity verification, strong audit, batch actions and live-session protection. Compatible with DSH 0.2.1-rc.2.",
   "author": "shibamalaomushi",
   "main": "./index.js",
   "exports": {
@@ -49,7 +49,7 @@
     "url": "https://github.com/shibamalaomushi/dsh-delete-guard/issues"
   },
   "scripts": {
-    "test": "node test/selftest.mjs && node test/paths.mjs && node test/audit.mjs . && node test/sensitive-scan.mjs ."
+    "test": "node test/selftest.mjs && node test/paths.mjs && node test/regression-2.1.mjs && node test/client-runtime.mjs && node test/audit.mjs . && node test/sensitive-scan.mjs ."
   },
   "dsh": {
     "manifestVersion": 1,

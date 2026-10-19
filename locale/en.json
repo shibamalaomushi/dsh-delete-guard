@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Session Manager",
-    "description": "List every session and delete one without touching the others; deletions go to a trash you can restore from, the deletion policy is enforced server-side, automatic cleanup honors the same policy, and queued deletions require confirmation. Compatible with DeepSeek Harness 0.2.1-rc.2."
+    "description": "List every session and delete one without touching the others; deletions go to a trash you can restore from, the deletion policy is enforced server-side, automatic cleanup honors the same policy, and queued deletions require confirmation by default. Compatible with DeepSeek Harness 0.2.1-rc.2."
   },
   "panel": "Sessions",
   "title": "Session Manager",
@@ -11,14 +11,13 @@
   "empty": "No sessions.",
   "sessions": "Sessions",
   "trash": "Trash",
-  "pending": "Queued for deletion (runs on next launch)",
-  "unlisted": "unlisted",
+  "pending": "Queued for deletion (confirmation by default)",
   "live": "in use",
-  "liveHint": "This session is in use by the running process; deleting it now would recreate it immediately. Switch to another session first, or queue it for deletion on next launch.",
+  "liveHint": "This session is in use by the running process; deleting it now would recreate it immediately. Switch to another session first, or queue it for deletion.",
   "delete": "Delete",
   "confirmDelete": "Confirm delete",
   "cancel": "Cancel",
-  "queue": "Queue for next launch",
+  "queue": "Queue for deletion",
   "unqueue": "Unqueue",
   "restore": "Restore",
   "purge": "Delete permanently",
@@ -33,9 +32,9 @@
   "failed": "Failed",
   "trashEmpty": "The trash is empty.",
   "pendingEmpty": "Nothing is queued.",
-  "pendingHint": "These sessions move to the trash when the app next starts, when nothing holds them.",
+  "pendingHint": "These sessions are not deleted silently at startup; confirm and run them from the panel.",
   "unreachable": "Cannot reach the plugin backend: {error} (on the desktop app you may need to restart once after installing the plugin)",
-  "queued": "Queued for deletion on next launch.",
+  "queued": "Queued for deletion.",
   "restored": "Restored.",
   "purged": "Permanently deleted.",
   "backup": "The log moved to the trash below and can be restored from there."

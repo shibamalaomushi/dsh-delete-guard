@@ -123,7 +123,7 @@ check(
     host.includes('trashPolicyRejection'),
 )
 check('index.js 批量响应使用 succeeded 而不是覆盖 ok', host.includes('const succeeded = results.filter') && host.includes('succeeded,'))
-check('index.js 自动清理逐条过策略', host.includes('function sweepTrash') && host.includes('trashPolicyRejection(entry.meta)') && host.includes('POLICY.allowPurge'))
+check('index.js 自动清理逐条过策略', host.includes('function sweepTrash') && /trashPolicyRejection\(entry\.meta(?:,|\))/.test(host) && host.includes('POLICY.allowPurge'))
 check('index.js 回收站目录不由 meta.dir 决定', host.includes('normalizeMeta') && !/dir\s*:\s*raw\.dir/.test(host) && host.includes('payloadOf'))
 check('index.js 删除 stripIdDeep 整树遍历', !host.includes('stripIdDeep'))
 check('index.js 0.2.1 workspaceRegistry 主路径', host.includes("getWorkspaceRegistry") && host.includes('detachSession') && host.includes('attachSession'))
@@ -132,6 +132,24 @@ check('index.js 使用 sessionPersistence.root', host.includes('persistence.root
 check('index.js 默认不自动处理排队', host.includes('processPendingOnStartup') && host.includes("result: 'deferred'"))
 check('index.js 有日志轮转与单行上限', host.includes('logMaxBytes') && host.includes('rotateLogIfNeeded') && host.includes('MAX_LOG_LINE_BYTES'))
 check('index.js 有启动恢复与引用修复', host.includes('recoverTrash') && host.includes('retryPendingRefs') && host.includes('refsPending'))
+check(
+  'index.js 有身份/事务/精确确认回归防线',
+  host.includes('readSessionHeaderFromDir') &&
+    host.includes('inspectTrashEntry') &&
+    host.includes('restoring-payload') &&
+    host.includes('entryIds') &&
+    host.includes('sessionIds') &&
+    host.includes('protection-unknown') &&
+    host.includes('cross-device'),
+)
+check('client.js 有请求序号/入口请求 TTL/本地化错误', client.includes('loadSeq') && client.includes('ARM_TTL_MS') && client.includes('errorText'))
+check('client.js 为 /sessions 行提供视觉图标装饰', client.includes('installCommandIconDecorator') && client.includes('dsm-commandIcon'))
+check('client.js 有焦点圈定与遮罩关闭', client.includes('querySelectorAll(') && client.includes('dsm-modalMask') && client.includes('onMouseDown'))
+if (exists('test')) {
+  check('回归与客户端测试文件存在', exists('test/regression-2.1.mjs') && exists('test/client-runtime.mjs'))
+} else {
+  console.log('skip 安装副本不含 test/')
+}
 check('index.js 在 workspace 注册表存在时检查 activity', host.includes("ctx.waterfall('workspace/session-activity'") && host.includes('assertNoActivity'))
 check(
   'index.js 的批量上限 / 确认阈值 / 确认词可配置',

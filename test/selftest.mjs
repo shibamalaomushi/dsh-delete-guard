@@ -43,7 +43,12 @@ const check = (name, ok, extra = '') => {
 const wait = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms))
 const uid = () => crypto.randomUUID()
 const sessionId = () => `session-${uid()}`
-const sessionFile = (slug, id) => path.join(SESS, slug, id, 'session.v4.jsonl.zstd')
+// Node 20 has no zstd API; the plugin also accepts plain JSONL. Exercise the
+// same behavior with a plain log there and keep zstd coverage on Node 22/24.
+const HAS_ZSTD = process.env.DSM_FORCE_PLAIN_LOG !== '1' && typeof zlib.zstdCompressSync === 'function'
+const LOG_NAME = HAS_ZSTD ? 'session.v4.jsonl.zstd' : 'session.v4.jsonl'
+const encodeLog = (text) => (HAS_ZSTD ? zlib.zstdCompressSync(Buffer.from(text)) : Buffer.from(text))
+const sessionFile = (slug, id) => path.join(SESS, slug, id, LOG_NAME)
 const cacheFile = (id) => path.join(CACHE, `${id}.json`)
 const readMeta = (entryId) => JSON.parse(fs.readFileSync(path.join(TRASH, entryId, 'meta.json'), 'utf8'))
 const writeMeta = (entryId, meta) => fs.writeFileSync(path.join(TRASH, entryId, 'meta.json'), JSON.stringify(meta, null, 2))
@@ -61,7 +66,7 @@ function writeSession(root, slug, id, title, cwd, header = null) {
     isSeeded: false,
   }) + '\n'
   const body = 'x'.repeat(100)
-  fs.writeFileSync(path.join(root, slug, id, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(Buffer.from(line + body)))
+  fs.writeFileSync(path.join(root, slug, id, LOG_NAME), encodeLog(line + body))
   fs.mkdirSync(CACHE, { recursive: true })
   fs.writeFileSync(
     path.join(CACHE, `${id}.json`),
@@ -465,7 +470,7 @@ if (process.platform === 'win32') {
   check('自定义 sessionsRoot 能删除会话', del.status === 200 && !fs.existsSync(sessionFileIn(custom, slug, id)), JSON.stringify(del.json))
 }
 function sessionFileIn(root, slug, id) {
-  return path.join(root, slug, id, 'session.v4.jsonl.zstd')
+  return path.join(root, slug, id, LOG_NAME)
 }
 
 // 10) 排队默认不执行，手动确认后执行

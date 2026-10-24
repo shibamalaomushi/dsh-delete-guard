@@ -9,8 +9,9 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const PKG = process.argv[2] ?? path.join(path.dirname(new URL(import.meta.url).pathname.slice(1)), '..')
+const PKG = process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const NAME = 'dsh-delete-guard'
 let pass = 0
 let fail = 0

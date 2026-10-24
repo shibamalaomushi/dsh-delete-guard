@@ -5,9 +5,10 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import vm from 'node:vm'
 
-const root = path.join(path.dirname(new URL(import.meta.url).pathname.slice(1)), '..')
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = fs.readFileSync(path.join(root, 'client.js'), 'utf8')
 let definition = null
 const slashButton = {

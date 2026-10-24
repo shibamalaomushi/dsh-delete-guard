@@ -16,6 +16,9 @@ import { apply } from '../index.js'
 const TMP = path.join(os.tmpdir(), `dsm-2.1-${Date.now()}-${Math.random().toString(36).slice(2)}`)
 const SLUG = '--E-regression--'
 const WS = 'E:\\regression'
+const HAS_ZSTD = process.env.DSM_FORCE_PLAIN_LOG !== '1' && typeof zlib.zstdCompressSync === 'function'
+const LOG_NAME = HAS_ZSTD ? 'session.v4.jsonl.zstd' : 'session.v4.jsonl'
+const encodeLog = (text) => (HAS_ZSTD ? zlib.zstdCompressSync(Buffer.from(text)) : Buffer.from(text))
 let pass = 0
 let fail = 0
 let seq = 0
@@ -61,7 +64,7 @@ function writeSession(home, id, options = {}) {
   fs.mkdirSync(dir, { recursive: true })
   const header = sessionHeader(id, options)
   const line = `${JSON.stringify(header)}\n`
-  fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(Buffer.from(`${line}${'x'.repeat(64)}`)))
+  fs.writeFileSync(path.join(dir, LOG_NAME), encodeLog(`${line}${'x'.repeat(64)}`))
   if (options.cache !== false) {
     const cache = path.join(home, 'storages', 'session_projcache', 'sessions')
     fs.mkdirSync(cache, { recursive: true })
@@ -233,7 +236,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   )
   const result = await call(routes, del, { method: 'POST', body: { id } })
   check('R01 删除期间出现活动返回 409', result.status === 409, JSON.stringify(result.json))
-  check('R01 正文已回滚到原目录', fs.existsSync(path.join(written.dir, 'session.v4.jsonl.zstd')))
+  check('R01 正文已回滚到原目录', fs.existsSync(path.join(written.dir, LOG_NAME)))
   check('R01 回收站没有残留条目', fs.readdirSync(trashRoot(home)).length === 0)
 }
 
@@ -271,7 +274,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   check('R03 /list 仍可用并暴露 configErrors', listed.status === 200 && listed.json?.configErrors?.length >= 3, JSON.stringify(listed.json?.configErrors))
   const result = await call(routes, del, { method: 'POST', body: { id } })
   check('R03 配置无效时删除被 503 阻止', result.status === 503 && result.json?.code === 'config-invalid', JSON.stringify(result.json))
-  check('R03 会话没有被移动', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, 'session.v4.jsonl.zstd')))
+  check('R03 会话没有被移动', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, LOG_NAME)))
 }
 
 // ── 4. R04: startup recovery never rmSyncs an incomplete entry ─────────────
@@ -331,7 +334,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const entryId = `20260101000000001_${id}`
   const entryDir = path.join(trashRoot(home), entryId)
   fs.mkdirSync(path.join(entryDir, 'payload'), { recursive: true })
-  fs.writeFileSync(path.join(entryDir, 'payload', 'session.v4.jsonl.zstd'), fs.readFileSync(path.join(sessionsRoot(home), SLUG, id, 'session.v4.jsonl.zstd')))
+  fs.writeFileSync(path.join(entryDir, 'payload', LOG_NAME), fs.readFileSync(path.join(sessionsRoot(home), SLUG, id, LOG_NAME)))
   fs.rmSync(path.join(sessionsRoot(home), SLUG, id), { recursive: true, force: true })
   fs.mkdirSync(path.join(entryDir, 'projection'), { recursive: true })
   fs.writeFileSync(path.join(entryDir, 'projection', `${id}.json`), '{"cache":1}')
@@ -388,7 +391,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
     const { routes } = await fresh({ trashKeepDays: 0 }, { home })
     const result = await call(routes, del, { method: 'POST', body: { id } })
     check('R06 部分投影失败返回失败但带 entryId', result.status === 500 && typeof result.json?.details?.entryId === 'string', JSON.stringify(result.json))
-    check('R06 正文已回滚', fs.existsSync(path.join(written.dir, 'session.v4.jsonl.zstd')))
+    check('R06 正文已回滚', fs.existsSync(path.join(written.dir, LOG_NAME)))
     check('R06 已搬移的第一个缓存已回滚', fs.existsSync(path.join(cache, `${id}.json`)))
     check('R06 未留下回收站条目', fs.readdirSync(trashRoot(home)).length === 0)
   } finally {
@@ -411,7 +414,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const restored = await call(routes, restore, { method: 'POST', body: { entryId } })
   check('R07 冲突时返回部分还原', restored.status === 200 && restored.json?.partial === true, JSON.stringify(restored.json))
   check('R07 回收站条目保留冲突副本', fs.existsSync(path.join(trashRoot(home), entryId, 'projection', `${id}.json`)))
-  check('R07 正文确实已还原', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, 'session.v4.jsonl.zstd')))
+  check('R07 正文确实已还原', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, LOG_NAME)))
   check('R07 较新的缓存没有被覆盖', fs.readFileSync(path.join(cache, `${id}.json`), 'utf8').includes('newer'))
 }
 
@@ -429,7 +432,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const { routes } = await fresh({ trashKeepDays: 0 }, { home })
   const result = await call(routes, del, { method: 'POST', body: { id } })
   check('R08 超过投影上限时拒绝删除', result.status === 413 && result.json?.code === 'projection-too-many', JSON.stringify(result.json))
-  check('R08 正文仍在原位', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, 'session.v4.jsonl.zstd')))
+  check('R08 正文仍在原位', fs.existsSync(path.join(sessionsRoot(home), SLUG, id, LOG_NAME)))
 }
 
 // ── 9. R09/R10: exact consent sets are required ────────────────────────────
@@ -481,7 +484,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   writeSession(home, id)
   const first = await fresh({ trashKeepDays: 0 }, { home })
   await call(first.routes, queuePath, { method: 'POST', body: { id } })
-  const bogus = path.join(sessionsRoot(home), SLUG, id, 'session.v4.jsonl.zstd')
+  const bogus = path.join(sessionsRoot(home), SLUG, id, LOG_NAME)
   fs.writeFileSync(bogus, 'not a session header')
   const second = await fresh({ trashKeepDays: 0 }, { home, persistence: { fail: true } })
   const listed = await call(second.routes, list)
@@ -517,7 +520,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const entryId = `20250101000000000_${id}`
   const entryDir = path.join(trashRoot(home), entryId)
   fs.mkdirSync(path.join(entryDir, 'payload'), { recursive: true })
-  fs.copyFileSync(path.join(written.dir, 'session.v4.jsonl.zstd'), path.join(entryDir, 'payload', 'session.v4.jsonl.zstd'))
+  fs.copyFileSync(path.join(written.dir, LOG_NAME), path.join(entryDir, 'payload', LOG_NAME))
   fs.rmSync(written.dir, { recursive: true, force: true })
   writeJson(path.join(entryDir, 'meta.json'), {
     metaVersion: 3,
@@ -593,7 +596,7 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const denied = await call(second.routes, restore, { method: 'POST', body: { entryId: removed.json.entryId } })
   check('R17 根变更时默认拒绝还原', denied.status === 409 && denied.json?.code === 'root-changed', JSON.stringify(denied.json))
   const allowed = await call(second.routes, restore, { method: 'POST', body: { entryId: removed.json.entryId, relocate: true } })
-  check('R17 显式迁移可以还原到当前根', allowed.status === 200 && fs.existsSync(path.join(rootB, SLUG, id, 'session.v4.jsonl.zstd')), JSON.stringify(allowed.json))
+  check('R17 显式迁移可以还原到当前根', allowed.status === 200 && fs.existsSync(path.join(rootB, SLUG, id, LOG_NAME)), JSON.stringify(allowed.json))
 }
 
 // ── 15. R18/R19: file type, header identity and header kind ────────────────
@@ -639,15 +642,20 @@ const queuePath = '/dsh-delete-guard/api/queue'
   const dir = path.join(sessionsRoot(home), SLUG, id)
   fs.mkdirSync(dir, { recursive: true })
   const header = sessionHeader(id)
-  const headerFrame = zlib.zstdCompressSync(Buffer.from(`${JSON.stringify(header)}\n`))
-  const bodyFrame = zlib.zstdCompressSync(Buffer.from('x'.repeat(2 * 1024 * 1024)))
-  fs.writeFileSync(path.join(dir, 'session.v4.jsonl.zstd'), Buffer.concat([headerFrame, bodyFrame]))
+  const largeBody = Buffer.from('x'.repeat(2 * 1024 * 1024))
+  const artifact = HAS_ZSTD
+    ? Buffer.concat([
+        zlib.zstdCompressSync(Buffer.from(`${JSON.stringify(header)}\n`)),
+        zlib.zstdCompressSync(largeBody),
+      ])
+    : Buffer.concat([Buffer.from(`${JSON.stringify(header)}\n`), largeBody])
+  fs.writeFileSync(path.join(dir, LOG_NAME), artifact)
   const { routes } = await fresh({ trashKeepDays: 0 }, { home })
   const listed = await call(routes, list)
   const row = listed.json.sessions.find((item) => item.id === id)
-  check('R18 大 zstd 日志仍能读出首帧身份', Boolean(row) && row.unverified === false, JSON.stringify(row))
+  check(`R18 大${HAS_ZSTD ? ' zstd ' : ''}日志仍能读出首帧身份`, Boolean(row) && row.unverified === false, JSON.stringify(row))
   const removed = await call(routes, del, { method: 'POST', body: { id } })
-  check('R18 大 zstd 日志可以正常删除', removed.status === 200, JSON.stringify(removed.json))
+  check(`R18 大${HAS_ZSTD ? ' zstd ' : ''}日志可以正常删除`, removed.status === 200, JSON.stringify(removed.json))
 }
 
 // ── 16. R20: missing payload is detected at purge time; force needs word ───

@@ -7,6 +7,34 @@
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-06
+
+适配 DeepSeek Harness `0.2.2-rc.1`。本版本保持 2.1.0 的删除/还原安全模型，只针对 0.2.2 的
+Session API、独立 fork 语义、身份读取降级和运行时要求做兼容加固。
+
+### Changed
+
+- **运行时基线**：`engines.node` 提升到 `>=24.9.0`（0.2.2 的最低 Node.js 版本），
+  `engines.dsh` 声明为 `>=0.2.2-rc.1 <0.3.0`。
+- **独立 fork 不再当作子代理**：0.2.2 起普通对话分支是独立会话。分类逻辑改为以
+  `origin: "subagent"` 为准；旧版 `parentSession` 描述符只在非 seeded 或带正数
+  `delegationDepth` 时才按子代理处理，避免把普通 fork 误标成子代理、也避免
+  `allowSubagentDelete: false` 误伤合法删除。
+- **子会话计数**：`childSessionCount` 只统计真实子代理，不再把旧版 fork 计入。
+
+### Fixed
+
+- **身份读取降级**：`sessionPersistence.list()` 是批量读取，0.2.2 下单个损坏/待迁移会话可能让整表
+  失败。新增 `sessionPersistence.stat(id)` 定向读取作为第二身份来源；批量索引不可用时仍能核验
+  `id/createdAt/cwd`，不会把可验证的会话误判为 `identity-unknown`。
+- **旧接口兼容**：`sessionPersistence` 缺少 `stat()` 或 `stat()` 失败时继续回退到日志首行
+  （含 v4 zstd 首帧），保持 0.2.1 行为。
+
+### Added
+
+- `test/regression-2.2.mjs`：覆盖独立 fork、真实子代理（UUID + origin）、批量索引失败时的
+  `stat()` 身份回退、日志首帧回退和活跃会话保护。
+
 ## [2.1.0] - 2026-10-19
 
 针对 25 项服务端/策略/持久性问题（R01–R25）和 12 项交互问题（U01–U12）的审查与修复。

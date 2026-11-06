@@ -39,7 +39,6 @@ DSM_FORBIDDEN="你的用户名,你的机器名,你的私有目录名" node test/
 
 > 注意：`CHANGELOG.md` 的 2.1.0 段落里**刻意保留了一处旧包名**（更名说明），这是文档而非泄漏；
 > 因此自定义禁词里**不要**加入旧名，否则扫描会固定命中这一行。
-
 扫描器会检查：各平台的绝对用户路径与家目录、邮箱、Windows 默认主机名（`DESKTOP-` 加 7 位
 大写字母数字）、私钥头、GitHub/Slack/OpenAI/AWS 的 token 形态，以及你追加的自定义禁词。
 
@@ -55,8 +54,9 @@ DSM_FORBIDDEN="你的用户名,你的机器名,你的私有目录名" node test/
 npm test
 ```
 
-应看到三套检查依次通过：`selftest`（端到端，在临时目录里跑）、`audit`（静态清单审计）、
-`sensitive-scan`（敏感信息扫描）。当前基线：**131 通过 / 57 通过 / 0 命中**。
+应看到各套检查依次通过：`selftest`（端到端，在临时目录里跑）、`paths`、`regression-2.1`、
+`regression-2.2`（0.2.2 专项）、`client-runtime`、`audit`（静态清单审计）、`sensitive-scan`（敏感信息扫描）。
+当前基线：**57 / 26 / 51 / 17 / 7 / 80 通过，0 命中**。
 
 ## 5. 版本与变更记录
 
@@ -87,34 +87,34 @@ tar -tzf dsh-delete-guard-*.tgz
 ```bash
 git init
 git add -A
-git commit -m "feat: dsh-delete-guard 2.1.0"
+git commit -m "feat: dsh-delete-guard 2.2.0"
 git branch -M main
 git remote add origin https://github.com/shibamalaomushi/dsh-delete-guard.git   # 也可用 SSH 地址
 git push -u origin main
 
-git tag -a v2.1.0 -m "dsh-delete-guard 2.1.0"
-git push origin v2.1.0
+git tag -a v2.2.0 -m "dsh-delete-guard 2.2.0"
+git push origin v2.2.0
 ```
 
 > **标签必须有**：安装方式二、以及 Release 资源的 URL 都依赖 tag（`v<版本>`，与 `package.json`
-> 的 `version` 一致）。打错标签要删远端再重打：`git push origin :refs/tags/v2.1.0`。
+> 的 `version` 一致）。打错标签要删远端再重打：`git push origin :refs/tags/v2.2.0`。
 
 ## 8. 创建 Release（上传单文件包）
 
 在 GitHub 上：**Releases → Draft a new release** →
 
-1. **Choose a tag**：选 `v2.1.0`（就是第 7 步推上去的那个）；
-2. **Release title**：`v2.1.0`；
+1. **Choose a tag**：选 `v2.2.0`（就是第 7 步推上去的那个）；
+2. **Release title**：`v2.2.0`；
 3. **Describe this release**：把 `CHANGELOG.md` 里该版本的条目贴进来，并补上下面的说明；
-4. **Attach binaries**：把 `dsh-delete-guard-2.1.0.tgz` 拖上去；
+4. **Attach binaries**：把 `dsh-delete-guard-2.2.0.tgz` 拖上去；
 5. **Publish release**。
 
 Release 说明建议包含：
 
 ```markdown
-一行安装（需要 DeepSeek Harness 0.2.0 及以上）：
+一行安装（需要 DeepSeek Harness 0.2.2 及以上）：
 
-    dsh plugin --profile desktop add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.1.0/dsh-delete-guard-2.1.0.tgz"
+    dsh plugin --profile desktop add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.2.0/dsh-delete-guard-2.2.0.tgz"
 
 装完重启一次应用。SHA256: <把第 6 步的校验和贴在这里>
 升级：内核不自动更新第三方插件，先 remove 再 add 一次即可（回收站与日志不受影响）。
@@ -126,10 +126,10 @@ Release 说明建议包含：
 
 ```bash
 # 主路径：Release 单文件包（推荐）
-dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.1.0/dsh-delete-guard-2.1.0.tgz"
+dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.2.0/dsh-delete-guard-2.2.0.tgz"
 
 # 备路径：tag 的源码快照
-dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v2.1.0"
+dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v2.2.0"
 ```
 
 两种方式都应装成**真实目录**（不是 Junction）——可用 `dsh plugin --profile <profile> list` 或直接看

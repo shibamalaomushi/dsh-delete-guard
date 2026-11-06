@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "Session Manager",
-    "description": "List every session and delete one without touching the others; deletions go to a trash you can restore from, the deletion policy is enforced server-side, automatic cleanup honors the same policy, and queued deletions require confirmation by default. Compatible with DeepSeek Harness 0.2.1-rc.2."
+    "description": "List every session and delete one without touching the others; deletions go to a trash you can restore from, the deletion policy is enforced server-side, automatic cleanup honors the same policy, and queued deletions require confirmation by default. Compatible with DeepSeek Harness 0.2.2-rc.1."
   },
   "panel": "Sessions",
   "title": "Session Manager",

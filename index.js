@@ -3,12 +3,15 @@
  *
  * 目标：安全地删除**单条**会话，绝不影响其它会话；默认移入回收站可还原。
  *
- * 0.2.1-rc.2 适配：
+ * 0.2.2-rc.1 适配（兼容 0.2.1-rc.2）：
  * - Session 根以 `ctx.sessionPersistence.root` 为准（缺失时回退 `<DSH_HOME>/sessions`）；
  * - 不再重实现 projectKey：扫描真实目录，用 Session header 的 cwd 归属工作区；
- * - workspace 引用通过 `ctx.workspaceRegistry` 更新（0.2.1 的 workspace.json 是
+ * - workspace 引用通过 `ctx.workspaceRegistry` 更新（0.2.1+ 的 workspace.json 是
  *   storage-json 的 single 单元，外部改写会被内存权威覆盖，且可能损坏领域）；
- * - 后台任务检查使用 0.2.1 仍在的 `workspace/session-activity` waterfall；
+ * - 后台任务检查使用 0.2.1+ 仍在的 `workspace/session-activity` waterfall；
+ * - 0.2.2 起普通对话 fork 是独立会话，只有 `origin: "subagent"`（或旧版非 seeded
+ *   子代理 header）才按子代理处理；
+ * - 批量 `sessionPersistence.list()` 失败时用定向 `stat(id)` 读身份，再回退日志首帧；
  * - 客户端 bundle 继续遵循 dsh.client 的惰性模块约定。
  *
  * 安全模型：
@@ -57,11 +60,32 @@ const MAX_JSON_READ_BYTES = 8 * 1024 * 1024
 const MAX_PROJECTION_FILES = 512
 const MAX_PENDING_ITEMS = 10000
 const MAX_REPAIR_ITEMS = 10000
-const PLUGIN_VERSION = '2.1.0'
+const PLUGIN_VERSION = '2.2.0'
 const META_VERSION = 3
 const PHASES = new Set(['prepared', 'payload-moved', 'projections-moved', 'refs-pending', 'complete', 'restoring-payload', 'restored-payload', 'aborted', 'empty'])
+/** Session format generations this release has been exercised against (DSH 0.2.1 v4 and 0.2.2 v4). */
+const KNOWN_SESSION_FORMATS = new Set([1, 2, 3, 4])
 
 const sessionKind = (id) => (SESSION_ID_RE.test(id) ? 'main' : 'subagent')
+
+/**
+ * Whether a stored header describes a real subagent (as opposed to an
+ * ordinary conversation fork).
+ *
+ * DSH 0.2.2 made ordinary forks independent: their header carries
+ * `isSeeded: true` and no `origin`, and newer forks do not carry
+ * `parentSession` at all. Older subagent descriptors can lack `origin`, so a
+ * bare `parentSession` is still treated as a subagent unless the header has
+ * the seeded shape of a fork. A seeded header that explicitly declares a
+ * positive `delegationDepth` is a real subagent.
+ */
+function isSubagentHeader(header) {
+  if (!header || typeof header !== 'object') return false
+  if (header.origin === 'subagent') return true
+  if (typeof header.parentSession !== 'string' || header.parentSession === '') return false
+  if (header.isSeeded === true && !(Number.isSafeInteger(header.delegationDepth) && header.delegationDepth > 0)) return false
+  return true
+}
 
 class HttpError extends Error {
   constructor(status, code, message, details) {
@@ -1551,19 +1575,55 @@ export function apply(ctx, config) {
     return stored?.map?.get(id) ?? null
   }
 
-  function resolveSessionIdentity(id, found, stored) {
+  /**
+   * Targeted identity lookup for the 0.2.2 persistence seam.
+   *
+   * `sessionPersistence.list()` is a bulk read: one unreadable or
+   * migration-required artifact can reject the whole listing. `stat(id)` asks
+   * only for the session being deleted, so identity verification still works
+   * when the bulk index is degraded. Errors are contained here and fall back
+   * to reading the on-disk header.
+   */
+  async function storedHeaderStat(id) {
+    const persistence = getPersistence()
+    if (!persistence || typeof persistence.stat !== 'function') return null
+    try {
+      const snapshot = await persistence.stat(id)
+      const header = snapshot?.header
+      if (header && typeof header.id === 'string' && header.id === id) return header
+    } catch {
+      /* fall back to the on-disk header */
+    }
+    return null
+  }
+
+  async function resolveSessionIdentity(id, found, stored) {
     const indexed = storedHeaderFor(id, stored)
-    const onDisk = indexed ? null : readSessionHeaderFromDir(found.dir, id)
-    const header = indexed ?? onDisk
+    if (indexed) {
+      return {
+        header: indexed,
+        source: 'index',
+        verified: indexed.id === id,
+      }
+    }
+    const fromStat = await storedHeaderStat(id)
+    if (fromStat) {
+      return {
+        header: fromStat,
+        source: 'stat',
+        verified: fromStat.id === id,
+      }
+    }
+    const onDisk = readSessionHeaderFromDir(found.dir, id)
     return {
-      header,
-      source: indexed ? 'index' : onDisk ? 'log' : 'none',
-      verified: Boolean(header && header.id === id),
+      header: onDisk,
+      source: onDisk ? 'log' : 'none',
+      verified: Boolean(onDisk && onDisk.id === id),
     }
   }
 
   function classifySession(id, header) {
-    if (header?.origin === 'subagent' || header?.parentSession) return 'subagent'
+    if (isSubagentHeader(header)) return 'subagent'
     if (header && header.id === id) return 'main'
     if (SESSION_ID_RE.test(id)) return 'main'
     return 'unknown'
@@ -1580,7 +1640,7 @@ export function apply(ctx, config) {
       const warnings = [...snapshot.warnings, ...stored.warnings]
       const childCounts = new Map()
       for (const header of stored.map.values()) {
-        if (typeof header?.parentSession === 'string' && header.parentSession) {
+        if (isSubagentHeader(header) && typeof header.parentSession === 'string' && header.parentSession) {
           childCounts.set(header.parentSession, (childCounts.get(header.parentSession) ?? 0) + 1)
         }
       }
@@ -2168,7 +2228,7 @@ export function apply(ctx, config) {
     assertProtectionKnown(captured.snapshot)
 
     const stored = await readStoredHeaders()
-    const identity = resolveSessionIdentity(id, found, stored)
+    const identity = await resolveSessionIdentity(id, found, stored)
     if (identity.header && identity.header.id !== id) {
       throw new HttpError(409, 'identity-mismatch', POLICY_MESSAGES['identity-mismatch'])
     }
@@ -3029,7 +3089,7 @@ export function apply(ctx, config) {
     let found = findSessionDir(id)
     assertNoSymlinkAncestors(found.dir, found.scan.root)
     const stored = await readStoredHeaders()
-    const identity = resolveSessionIdentity(id, found, stored)
+    const identity = await resolveSessionIdentity(id, found, stored)
     if (identity.header && identity.header.id !== id) {
       throw new HttpError(409, 'identity-mismatch', POLICY_MESSAGES['identity-mismatch'])
     }
@@ -3133,7 +3193,7 @@ export function apply(ctx, config) {
       const id = item.sessionId
       try {
         const found = findSessionDir(id)
-        const identity = resolveSessionIdentity(id, found, stored)
+        const identity = await resolveSessionIdentity(id, found, stored)
         const header = identity.header
         const identityRecorded = item.createdAt !== null || Boolean(item.cwd)
         if (!header) {

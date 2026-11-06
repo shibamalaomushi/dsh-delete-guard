@@ -76,7 +76,7 @@ DSH 生态里已经有不少会话管理与回收站类插件。本插件的取�
 1. **只删目标那些**：会话 id 需匹配严格格式，且必须是真实会话根下的直接子目录；目录里**必须真的有普通文件**
    （`session*.jsonl[.zstd]`，子目录同名不算），并优先用宿主索引/日志首行 header 核验 `id`、`createdAt`、`cwd`。
    默认 `requireVerifiedSession: true`，身份不可确认时拒绝删除；损坏/历史数据需显式关闭该开关再人工处置。
-   会话根默认取 `ctx.sessionPersistence.root`（0.2.1），可用 `sessionsRoot` 显式覆盖。
+   会话根默认取 `ctx.sessionPersistence.root`（0.2.1+ / 0.2.2），可用 `sessionsRoot` 显式覆盖。
 2. **所有路径都做真实路径校验**：先词法检查，再 `realpath` + 逐层 `lstat`；拒绝 symlink/junction 祖先、
    拒绝跨盘绝对路径、拒绝悬空链接目标。`DSH_HOME`、`session-manager`、`trash`、投影缓存根和
    `workspace.json` 都先规范化/拒绝链接；还原目标只用 `workspaceSlug + sessionDirName` 重建，不直接信任
@@ -99,7 +99,7 @@ DSH 生态里已经有不少会话管理与回收站类插件。本插件的取�
 8. **策略闸门服务端强制**：界面禁用只是提示；策略违规先于参数校验返回。单条/批量/清空/列表标记共用
    判定函数；子代理/主会话分类使用**同一份** header 证据，并持久化到回收站 meta。置顶/归档保护开启时，
    权威状态读不出来按 `protection-unknown` 拒绝，而不是静默放行。
-9. **0.2.1 引用通过 `ctx.workspaceRegistry` 更新**：`detachSession` / `attachSession` /
+9. **0.2.2（兼容 0.2.1）引用通过 `ctx.workspaceRegistry` 更新**：`detachSession` / `attachSession` /
    `archiveSession` / `pinSession` 等；不再直接改写 `workspace.json`。无注册表时才回退到定向、带备份和
    写后校验的旧版文件更新。引用缺失/方法不可用会明确警告并进入修复队列，不再误报成功。
 10. **不做格式耦合**：整目录移动，`session.v4.jsonl.zstd` 还是将来的 `vN`、压缩还是明文都一样处理。
@@ -149,9 +149,9 @@ DSH 生态里已经有不少会话管理与回收站类插件。本插件的取�
 
 | 路径 | 作用 |
 | --- | --- |
-| `<sessionPersistence.root>/<工作区>/<会话目录>/` | 会话正文（整目录移动 / 还原）；0.2.1 默认 `$DSH_HOME/sessions` |
+| `<sessionPersistence.root>/<工作区>/<会话目录>/` | 会话正文（整目录移动 / 还原）；0.2.2 默认 `$DSH_HOME/sessions` |
 | `<DSH_HOME>/storages/session_projcache/sessions/<会话id>.json`（及 `.bak.*`） | 投影缓存（一并移动；删掉会按需重建） |
-| `ctx.workspaceRegistry` | 侧边栏引用 / 归档 / 置顶状态（0.2.1 主路径） |
+| `ctx.workspaceRegistry` | 侧边栏引用 / 归档 / 置顶状态（0.2.2/0.2.1 主路径） |
 | `<DSH_HOME>/storages/workspace.json` | 仅在没有 workspaceRegistry 时作为兼容回退，定向更新并写后校验 |
 | `<DSH_HOME>/session-manager/` | 插件自己的回收站、排队表、修复队列、审计日志（目录名沿用 `session-manager`） |
 
@@ -165,13 +165,13 @@ GitHub Release 里的 `dsh-delete-guard-<版本>.tgz` 只有 ~85 KB，一条命�
 不需要构建，实测约 0.3 秒）：
 
 ```bash
-dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.1.0/dsh-delete-guard-2.1.0.tgz"
+dsh plugin --profile <profile> add "https://github.com/shibamalaomushi/dsh-delete-guard/releases/download/v2.2.0/dsh-delete-guard-2.2.0.tgz"
 ```
 
 **方式二：从 tag 的源码快照（不需要 Release 资源，但会下载整个仓库快照）**
 
 ```bash
-dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v2.1.0"
+dsh plugin --profile <profile> add "https://codeload.github.com/shibamalaomushi/dsh-delete-guard/tar.gz/refs/tags/v2.2.0"
 ```
 
 **方式三：从本地目录（开发/自用）**
@@ -203,7 +203,7 @@ dsh plugin --profile <profile> remove dsh-delete-guard
   删除退化为"排入待删除"——刻意保守。异步等待后会复查活跃状态，rename 后若发现已活跃则回滚。
 - **跨进程占用无法探测**：Windows 上内核的会话写租约是"具名内核信号量、无文件痕迹"（内核文档明确如此），
   第三方插件无法可靠探测，也不应去探测。因此"另一个 DSH 实例正在写同一条会话"只能靠排队到重启后执行规避。
-- **0.2.1 workspace 以内存为权威**：插件通过 `ctx.workspaceRegistry` 更新引用；只有没有注册表的组合才回退到
+- **0.2.1+ workspace 以内存为权威**：插件通过 `ctx.workspaceRegistry` 更新引用；只有没有注册表的组合才回退到
   `workspace.json` 的定向更新。旧回退在宿主下一次整体写入时可能被覆盖。
 - **回收站不跨卷**：`rename` 要求回收站与会话根在同一磁盘卷（默认都在 `<DSH_HOME>` 下）；跨卷返回
   `cross-device`，不会隐式复制。
@@ -219,18 +219,23 @@ dsh plugin --profile <profile> remove dsh-delete-guard
   事务阶段和启动恢复用于缩小窗口。
 - **大目录扫描**：列表仍是同步全量扫描（已去掉 O(n²) 的子会话/活跃度计算，批量共享一次扫描）；超大 profile
   可能阻塞事件循环，后续版本再引入分页/异步索引。
-- **斜杠命令图标**：0.2.1 的内核只给一等公民命令映射图标，自定义 Host 命令的描述符没有 icon 字段；2.1.0
-  对 Host 渲染的 `/sessions` 菜单行做纯视觉装饰（14px 图标），命令解析/执行不变。上游增加 icon/face registry
+- **斜杠命令图标**：0.2.1/0.2.2 的内核只给一等公民命令映射图标，自定义 Host 命令的描述符没有 icon 字段；2.1.0
+  起对 Host 渲染的 `/sessions` 菜单行做纯视觉装饰（14px 图标），命令解析/执行不变。上游增加 icon/face registry
   后可移除装饰器。
 
 ## 兼容性
 
-- 面向 DSH `0.2.1-rc.2` 开发与验证（`dsh-base` + `dsh-web-app` 组合）；`engines.dsh` 声明为
-  `>=0.2.1-rc.2 <0.3.0`。0.2.0 的 `workspace.json` 回退代码保留，但不在正式支持声明内。
-- 0.2.1 适配要点：Session 格式 v4（整目录移动，格式无关）、`ctx.sessionPersistence.root` 可配置、
-  workspace 领域 v2（通过 `ctx.workspaceRegistry` 更新）、`workspace/session-activity` 活动检查。
+- 面向 DSH `0.2.2-rc.1` 开发与验证（`dsh-base` + `dsh-web-app` 组合）；`engines.dsh` 声明为
+  `>=0.2.2-rc.1 <0.3.0`，`engines.node` 为 `>=24.9.0`（0.2.2 的运行时基线）。
+- 2.2.0 适配要点：Session 格式 v4（整目录移动，格式无关）、`ctx.sessionPersistence.root` 可配置、
+  workspace 领域 v2（通过 `ctx.workspaceRegistry` 更新）、`workspace/session-activity` 活动检查；
+  普通对话 fork 是独立会话（只有 `origin: "subagent"` 才是子代理）；`sessionPersistence.stat(id)`
+  作为批量 `list()` 失败时的定向身份来源。
+- 2.1.x 的 0.2.1-rc.2 服务契约仍保持兼容（`workspaceRegistry`、`workspace/session-activity`、
+  `sessionPersistence.root`、v4 日志首帧），便于从旧 profile 平滑升级。
 - 插件只使用 Node 内置模块与内核公开服务（`webServer`、`sessions`、`sessionPersistence`、
   `workspaceRegistry`，可选 `commands`、`connection`），不 import 任何 `@deepseek-ai/*` 包。
+- 0.2.2 的逐项契约核对见 [AUDIT-2.2.0.md](AUDIT-2.2.0.md)。
 - 浏览器半身遵循内核 Client 插件约定：`__ModuleLoader__` 惰性工厂、`sidebar.panellist` + root 作用域
   `main` 键控插槽、`sidebar.workspaces.session.row.action` / `.menu.item` 会话行插槽、只使用 `--dsw-*`
   主题 token、不 import 内核 Client 包。
@@ -261,10 +266,10 @@ dsh plugin --profile <profile> remove dsh-delete-guard
 ## 开发与测试
 
 ```bash
-npm test     # selftest + paths + regression-2.1 + client-runtime + audit + sensitive-scan
+npm test     # selftest + paths + regression-2.1 + regression-2.2 + client-runtime + audit + sensitive-scan
 ```
 
-- `test/selftest.mjs`：在**一次性假 DSH_HOME** 上端到端驱动 Host 半身，覆盖 0.2.1 根目录、workspaceRegistry、
+- `test/selftest.mjs`：在**一次性假 DSH_HOME** 上端到端驱动 Host 半身，覆盖 0.2.x 根目录、workspaceRegistry、
   子代理会话、诱饵目录、活跃/后台工作拒绝、信任围栏、路径守卫（含 junction/跨盘）、删除→回收站→还原→彻底删除、
   引用摘除与还原、归档/置顶恢复、meta 篡改与自动清理策略、批量响应、服务端确认词、排队默认不执行与手动执行、
   启动恢复、fail-closed、斜杠命令、日志轮转。不触碰任何真实数据。
@@ -272,6 +277,8 @@ npm test     # selftest + paths + regression-2.1 + client-runtime + audit + sens
   恢复不 rmSync、部分投影回滚、投影冲突、投影上限、精确确认集合、createdAt=null、身份读取失败、工作区消失、
   refsPending 清理顺序、损坏存储隔离、提交后失败仍返回 entryId、根切换、文件类型/header 身份、header 子代理、
   payload 缺失强制清理、junction 根、非回环对端、强审计。
+- `test/regression-2.2.mjs`：0.2.2 专项回归——独立 fork 不误判为子代理、UUID + `origin: "subagent"` 的真实子代理
+  仍受保护、`sessionPersistence.list()` 失败时 `stat(id)` 身份回退、v4 zstd 日志首帧回退、活跃会话保护优先。
 - `test/client-runtime.mjs`：在最小 `__ModuleLoader__`/React 桩上执行客户端半身并注册槽位，防止顶层/入口回归。
 - `test/paths.mjs`：纯路径函数测试（DSH_HOME 优先级/`~` 展开、单段校验、跨盘/UNC/链接/目标存在性）。
 - `test/audit.mjs`：按内核装载规则静态审计包（manifest、`./client` 出口、locale 元数据、patch 行、

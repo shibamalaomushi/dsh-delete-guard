@@ -37,7 +37,7 @@ check('dsh.bundle.patch 声明且文件存在', pkg.dsh?.bundle?.patch === './co
 check('dsh.client.platform 是 web', pkg.dsh?.client?.platform === 'web', String(pkg.dsh?.client?.platform))
 check('dsh.client.immediately 是布尔', typeof pkg.dsh?.client?.immediately === 'boolean')
 check('dsh.manifestVersion 已声明为 1', pkg.dsh?.manifestVersion === 1, String(pkg.dsh?.manifestVersion))
-check('engines.dsh 声明 0.2.1 兼容范围', typeof pkg.engines?.dsh === 'string' && pkg.engines.dsh.includes('0.2.1'), String(pkg.engines?.dsh))
+check('engines.dsh 声明 0.2.2 兼容范围', typeof pkg.engines?.dsh === 'string' && pkg.engines.dsh.includes('0.2.2'), String(pkg.engines?.dsh))
 check('版本已升到 2.x', /^2\.\d+\.\d+$/.test(String(pkg.version)), String(pkg.version))
 check('exports 暴露 ./client', typeof pkg.exports?.['./client'] === 'string', JSON.stringify(pkg.exports))
 check('exports 暴露 ./locale/*.json', typeof pkg.exports?.['./locale/*.json'] === 'string')

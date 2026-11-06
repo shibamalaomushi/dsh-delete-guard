@@ -19,8 +19,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 插件运行在 DSH 自带的 Node 上，桌面端当前是 24.x；覆盖 20/22/24 保证语法与 API 兼容。
-        node: ['20', '22', '24']
+        # DSH 0.2.2 的最低 Node.js 版本是 24.9；插件跟随宿主基线。
+        node: ['24.9', '24']
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
